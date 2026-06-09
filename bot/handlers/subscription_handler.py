@@ -125,13 +125,14 @@ async def cb_pay_platega(callback: CallbackQuery, db: Database) -> None:
 
     await db.update_payment_status(payment.id, "pending", result["payment_id"])
     plan_info = PLAN_LIMITS[plan]
+    support = await db.get_bot_setting("support_username", "")
     await callback.message.edit_text(
         f"{e('💳')} <b>Оплата через Platega</b>\n\n"
         f"Plan: {plan_info['emoji']} <b>{plan_info['label']}</b>\n"
         f"Сумма: <b>${amount}</b>\n\n"
         f"Нажмите кнопку ниже для оплаты.\n"
         f"После оплаты нажмите <b>«Проверить оплату»</b>.",
-        reply_markup=payment_waiting_kb(result["payment_url"], payment.id, "platega"),
+        reply_markup=payment_waiting_kb(result["payment_url"], payment.id, "platega", support),
         parse_mode="HTML",
     )
 
@@ -175,13 +176,14 @@ async def cb_pay_cryptobot(callback: CallbackQuery, db: Database) -> None:
 
     await db.update_payment_status(payment.id, "pending", str(result["invoice_id"]))
     plan_info = PLAN_LIMITS[plan]
+    support = await db.get_bot_setting("support_username", "")
     await callback.message.edit_text(
         f"{e('💠')} <b>Оплата через CryptoBot</b>\n\n"
         f"Plan: {plan_info['emoji']} <b>{plan_info['label']}</b>\n"
         f"Сумма: <b>{amount} USDT</b>\n\n"
         f"Откройте @CryptoBot для оплаты.\n"
         f"После оплаты нажмите <b>«Проверить оплату»</b>.",
-        reply_markup=payment_waiting_kb(result["bot_invoice_url"], payment.id, "cryptobot"),
+        reply_markup=payment_waiting_kb(result["bot_invoice_url"], payment.id, "cryptobot", support),
         parse_mode="HTML",
     )
 
@@ -211,6 +213,7 @@ async def cb_pay_ton(callback: CallbackQuery, db: Database) -> None:
     await db.update_payment_status(payment.id, "pending")
 
     plan_info = PLAN_LIMITS[plan]
+    support = await db.get_bot_setting("support_username", "")
     await callback.message.edit_text(
         f"{e('💎')} <b>Оплата TON</b>\n\n"
         f"Plan: {plan_info['emoji']} <b>{plan_info['label']}</b>\n"
@@ -219,7 +222,7 @@ async def cb_pay_ton(callback: CallbackQuery, db: Database) -> None:
         f"{e('📝')} <b>Комментарий (обязательно!):</b>\n<code>{info['payload']}</code>\n\n"
         f"{e('⚠️')} Без комментария платёж не будет засчитан!\n\n"
         f"После отправки нажмите <b>«Проверить оплату»</b>.",
-        reply_markup=ton_payment_kb(info["deeplink"], info["tonkeeper_url"], payment.id),
+        reply_markup=ton_payment_kb(info["deeplink"], info["tonkeeper_url"], payment.id, support),
         parse_mode="HTML",
     )
     await callback.answer()

@@ -87,7 +87,7 @@ def campaigns_list_kb(campaigns: list[Campaign]) -> InlineKeyboardMarkup:
 
 def cancel_to_camp_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(_btn(text="Отмена", callback_data="campaigns:list"))
+    builder.row(_btn(text="Назад", callback_data="campaigns:list"))
     return builder.as_markup()
 
 def confirm_delete_camp_kb(camp_id: int) -> InlineKeyboardMarkup:
@@ -135,7 +135,7 @@ def campaign_delay_kb(camp_id: int) -> InlineKeyboardMarkup:
         else:
             builder.row(_btn(text=t1, callback_data=f"camp:do_delay:{camp_id}:{v1}"))
             
-    builder.row(_btn(text="Отмена", callback_data=f"campaign:view:{camp_id}"))
+    builder.row(_btn(text="Назад", callback_data=f"campaign:view:{camp_id}"))
     return builder.as_markup()
 
 # --- Accounts ---
@@ -155,7 +155,7 @@ def accounts_list_kb(accounts: list[Account]) -> InlineKeyboardMarkup:
 
 def cancel_to_acc_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(_btn(text="Отмена", callback_data="accounts:list"))
+    builder.row(_btn(text="Назад", callback_data="accounts:list"))
     return builder.as_markup()
 
 def account_view_kb(acc: Account) -> InlineKeyboardMarkup:
@@ -256,7 +256,7 @@ def profile_kb(support_username: str = "") -> InlineKeyboardMarkup:
 
 def cancel_to_profile_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(_btn(text="Отмена", callback_data="profile:show"))
+    builder.row(_btn(text="Назад", callback_data="profile:show"))
     return builder.as_markup()
 
 # --- Admin ---
@@ -321,7 +321,7 @@ def account_delete_confirm_kb(account_id: int) -> InlineKeyboardMarkup:
 def skip_kb(callback_data: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(_btn(text="Пропустить", callback_data=callback_data))
-    builder.row(_btn(text="Отмена", callback_data="menu:main"))
+    builder.row(_btn(text="Назад", callback_data="menu:main"))
     return builder.as_markup()
 
 def database_menu_kb(campaign_id: int, stats: dict = None) -> InlineKeyboardMarkup:
@@ -394,7 +394,7 @@ def campaign_accounts_kb(campaign_id: int, user_accounts: list[Account], assigne
 def skip_proxy_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(_btn(text="Без прокси", callback_data="accounts:skip_proxy"))
-    builder.row(_btn(text="Отмена", callback_data="menu:main"))
+    builder.row(_btn(text="Назад", callback_data="menu:main"))
     return builder.as_markup()
 
 def plans_kb(pro_price: str, biz_price: str, support_username: str = "") -> InlineKeyboardMarkup:
@@ -405,6 +405,8 @@ def plans_kb(pro_price: str, biz_price: str, support_username: str = "") -> Inli
             continue
         price = pro_price if plan_id == "pro" else biz_price
         builder.row(_btn(text=f"{info['emoji']} {info['label']} — {price}/мес", callback_data=f"sub:select:{plan_id}"))
+    if support_username:
+        builder.row(_btn(text="💬 Поддержка", url=f"https://t.me/{support_username.lstrip('@')}"))
     builder.row(_btn(text="Назад", callback_data="menu:main"))
     return builder.as_markup()
 
@@ -412,23 +414,28 @@ def payment_provider_kb(plan_id: str, support_username: str = "") -> InlineKeybo
     builder = InlineKeyboardBuilder()
     builder.row(_btn(text="Картой (RUB/USD)", callback_data=f"pay:platega:{plan_id}"))
     builder.row(_btn(text="CryptoBot", callback_data=f"pay:cryptobot:{plan_id}"))
-    builder.row(_btn(text="TON (прямой)", callback_data=f"pay:ton:{plan_id}"))
-    builder.row(_btn(text="Отмена", callback_data="sub:plans"))
+    if support_username:
+        builder.row(_btn(text="💬 Поддержка", url=f"https://t.me/{support_username.lstrip('@')}"))
+    builder.row(_btn(text="Назад", callback_data="sub:plans"))
     return builder.as_markup()
 
-def payment_waiting_kb(url: str, payment_id: int, provider: str) -> InlineKeyboardMarkup:
+def payment_waiting_kb(url: str, payment_id: int, provider: str, support_username: str = "") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(_btn(text="Оплатить", url=url))
-    builder.row(_btn(text="Проверить оплату", callback_data=f"pay:check:{payment_id}"))
-    builder.row(_btn(text="Отмена", callback_data="sub:plans"))
+    builder.row(_btn(text="Проверить оплату", callback_data=f"pay:check:{provider}:{payment_id}"))
+    if support_username:
+        builder.row(_btn(text="💬 Поддержка", url=f"https://t.me/{support_username.lstrip('@')}"))
+    builder.row(_btn(text="Назад", callback_data="sub:plans"))
     return builder.as_markup()
 
-def ton_payment_kb(deeplink: str, tonkeeper_url: str, payment_id: int) -> InlineKeyboardMarkup:
+def ton_payment_kb(deeplink: str, tonkeeper_url: str, payment_id: int, support_username: str = "") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(_btn(text="Оплатить в TON (URI)", url=deeplink))
     builder.row(_btn(text="📲 Tonkeeper", url=tonkeeper_url))
-    builder.row(_btn(text="Проверить оплату", callback_data=f"pay:check:{payment_id}"))
-    builder.row(_btn(text="Отмена", callback_data="sub:plans"))
+    builder.row(_btn(text="Проверить оплату", callback_data=f"pay:check:ton:{payment_id}"))
+    if support_username:
+        builder.row(_btn(text="💬 Поддержка", url=f"https://t.me/{support_username.lstrip('@')}"))
+    builder.row(_btn(text="Назад", callback_data="sub:plans"))
     return builder.as_markup()
 
 def payment_success_kb() -> InlineKeyboardMarkup:
