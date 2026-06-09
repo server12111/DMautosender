@@ -48,6 +48,15 @@ async def _plans_text(db: Database) -> str:
     )
 
 
+@router.callback_query(F.data == "support:contact", StateFilter("*"))
+async def cb_support_contact(callback: CallbackQuery, db: Database) -> None:
+    username = await db.get_bot_setting("support_username", "")
+    if username:
+        await callback.answer(f"Поддержка: @{username.lstrip('@')}", show_alert=True)
+    else:
+        await callback.answer("Поддержка не настроена. Обратитесь к администратору.", show_alert=True)
+
+
 @router.callback_query(F.data == "sub:plans", StateFilter("*"))
 async def cb_plans(callback: CallbackQuery, db: Database) -> None:
     pro_price = await db.get_bot_setting("pro_price", str(config.DEFAULT_PRO_PRICE_USD))
