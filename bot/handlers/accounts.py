@@ -429,10 +429,15 @@ import shutil
 import zipfile
 import tempfile
 import asyncio
-from opentele.td import TDesktop
-from opentele.api import API, CreateNewSession
 from ..config import config
 from telethon import TelegramClient
+
+try:
+    from opentele.td import TDesktop
+    from opentele.api import API, CreateNewSession
+    _OPENTELE_AVAILABLE = True
+except ImportError:
+    _OPENTELE_AVAILABLE = False
 
 class MassAddStates(StatesGroup):
     waiting_zip = State()
@@ -485,36 +490,37 @@ async def mass_add_zip(message: Message, state: FSMContext, db: Database, manage
         for root, dirs, files in os.walk(extract_dir):
             if "tdata" in dirs:
                 tdata_path = os.path.join(root, "tdata")
-                try:
-                    tdesk = TDesktop(tdata_path)
-                    temp_session = os.path.join(tmpdir, f"temp_{added_count}.session")
-                    api = API.TelegramDesktop
-                    client = await tdesk.ToTelethon(session=temp_session, flag=CreateNewSession, api=api)
-                    await client.connect()
-                    me = await client.get_me()
-                    if me:
-                        phone = f"+{me.phone}" if me.phone else "Unknown"
-                        phone_clean = phone.replace("+", "")
-                        final_session = os.path.join(manager._sessions_path, f"{phone_clean}.session")
-                        
-                        await client.disconnect()
-                        shutil.copy2(temp_session, final_session)
-                        
-                        acc_id = await db.add_account(
-                            user_id=user.id, 
-                            phone=phone, 
-                            api_id=config.API_ID, 
-                            api_hash=config.API_HASH, 
-                            name=me.first_name, 
-                            session_file=final_session
-                        )
-                        await manager.reconnect(acc_id)
-                        added_count += 1
-                    else:
-                        error_count += 1
-                        await client.disconnect()
-                except Exception as e:
+                if not _OPENTELE_AVAILABLE:
                     error_count += 1
+                else:
+                    try:
+                        tdesk = TDesktop(tdata_path)
+                        temp_session = os.path.join(tmpdir, f"temp_{added_count}.session")
+                        api = API.TelegramDesktop
+                        client = await tdesk.ToTelethon(session=temp_session, flag=CreateNewSession, api=api)
+                        await client.connect()
+                        me = await client.get_me()
+                        if me:
+                            phone = f"+{me.phone}" if me.phone else "Unknown"
+                            phone_clean = phone.replace("+", "")
+                            final_session = os.path.join(manager._sessions_path, f"{phone_clean}.session")
+                            await client.disconnect()
+                            shutil.copy2(temp_session, final_session)
+                            acc_id = await db.add_account(
+                                user_id=user.id,
+                                phone=phone,
+                                api_id=config.API_ID,
+                                api_hash=config.API_HASH,
+                                name=me.first_name,
+                                session_file=final_session
+                            )
+                            await manager.reconnect(acc_id)
+                            added_count += 1
+                        else:
+                            error_count += 1
+                            await client.disconnect()
+                    except Exception:
+                        error_count += 1
                 dirs.remove("tdata")
                 
             for file in files:
