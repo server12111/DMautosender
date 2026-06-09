@@ -134,16 +134,17 @@ async def fsm_receive_file(
 
     await status_msg.edit_text(f"⏳ Добавляем в базу {len(identifiers)}...")
 
-    added = await db.add_targets_bulk(campaign_id, identifiers)
+    source_name = doc.file_name or "uploaded.txt"
+    added, skipped = await db.add_targets_bulk(campaign_id, identifiers, source_name)
     await state.clear()
-    
+
     campaign = await db.get_campaign(campaign_id)
     new_stats = await db.get_targets_stats(campaign_id)
 
     await status_msg.edit_text(
         f"✅ Файл успешно обработан!\n\n"
         f"Новых получателей добавлено: <b>{added}</b>\n"
-        f"Дубликатов пропущено: <b>{len(identifiers) - added}</b>\n{warning}\n\n"
+        f"Дубликатов пропущено: <b>{skipped}</b>\n{warning}\n\n"
         + _format_db_text(campaign, new_stats),
         reply_markup=database_menu_kb(campaign_id, new_stats),
         parse_mode="HTML",
@@ -222,7 +223,7 @@ async def fsm_receive_text(
         )
         return
 
-    await db.add_targets(campaign_id, targets)
+    added, skipped = await db.add_targets_bulk(campaign_id, targets, "manual_input")
     stats = await db.get_targets_stats(campaign_id)
     await state.clear()
 

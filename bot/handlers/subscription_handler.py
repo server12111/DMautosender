@@ -288,7 +288,7 @@ async def cb_check_payment(callback: CallbackQuery, db: Database, bot: Bot) -> N
             reward = payment.amount * 0.10
             await db.add_balance(user.referrer_id, reward)
             try:
-                referrer = await db.get_user(user.referrer_id)
+                referrer = await db.get_user_by_id(user.referrer_id)
                 if referrer:
                     await bot.send_message(
                         referrer.tg_id,

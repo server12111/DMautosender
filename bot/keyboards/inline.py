@@ -342,7 +342,7 @@ def database_menu_kb(campaign_id: int, stats: dict = None) -> InlineKeyboardMark
 def compose_menu_kb(campaign_id: int, has_image: bool = False, has_file: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(_btn(text="Изменить текст", callback_data=f"compose:edit_text:{campaign_id}"))
-    builder.row(_btn(text="🖼 Изменить фото/видео", callback_data=f"compose:set_file:{campaign_id}"))
+    builder.row(_btn(text="🖼 Изменить фото/видео", callback_data=f"compose:set_image:{campaign_id}"))
     if has_image or has_file:
         builder.row(_btn(text="Удалить медиа", callback_data=f"compose:clear_attach:{campaign_id}"))
     builder.row(_btn(text="Назад", callback_data=f"campaign:view:{campaign_id}"))

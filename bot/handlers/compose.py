@@ -144,14 +144,18 @@ async def fsm_receive_image(message: Message, state: FSMContext, db: Database) -
     )
 
 @router.message(StateFilter(ComposeStates.waiting_image), F.document)
-async def fsm_image_as_doc(message: Message) -> None:
+async def fsm_image_as_doc(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    campaign_id = data.get("campaign_id")
     await message.answer(
         "❌ Пожалуйста, отправьте фото <b>как фотографию</b>, а не как файл.",
         reply_markup=cancel_kb(f"compose:menu:{campaign_id}"), parse_mode="HTML",
     )
 
 @router.message(StateFilter(ComposeStates.waiting_image))
-async def fsm_image_wrong(message: Message) -> None:
+async def fsm_image_wrong(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    campaign_id = data.get("campaign_id")
     await message.answer(
         "❌ Пожалуйста, отправьте <b>фотографию</b>.",
         reply_markup=cancel_kb(f"compose:menu:{campaign_id}"), parse_mode="HTML",
@@ -188,7 +192,9 @@ async def fsm_receive_file(message: Message, state: FSMContext, db: Database) ->
     )
 
 @router.message(StateFilter(ComposeStates.waiting_file))
-async def fsm_file_wrong(message: Message) -> None:
+async def fsm_file_wrong(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    campaign_id = data.get("campaign_id")
     await message.answer(
         "❌ Пожалуйста, отправьте <b>файл</b> (документ).",
         reply_markup=cancel_kb(f"compose:menu:{campaign_id}"), parse_mode="HTML",
@@ -263,8 +269,8 @@ async def cb_compose_edit_text(callback: CallbackQuery, state: FSMContext) -> No
     await state.set_state(ComposeStates.waiting_text)
     
     b = InlineKeyboardBuilder()
-    b.row(_btn(text="Отмена", callback_data=f"compose:menu:{campaign_id}"))
-    
+    b.row(_btn(text="Назад", callback_data=f"compose:menu:{campaign_id}"))
+
     await callback.message.edit_text(
         f"{e('✏️')} <b>Изменение текста</b>\n\n" \
         f"Отправьте новый текст рассылки ответным сообщением.",

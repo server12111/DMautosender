@@ -37,7 +37,6 @@ def _get_user_id(db_user, tg_id: int) -> int:
 @router.callback_query(F.data == "tools:menu", StateFilter("*"))
 async def cb_tools_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await state.clear()
     try:
         if callback.message.document:
             await callback.message.answer(
