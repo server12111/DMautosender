@@ -414,6 +414,7 @@ def payment_provider_kb(plan_id: str, support_username: str = "") -> InlineKeybo
     builder = InlineKeyboardBuilder()
     builder.row(_btn(text="Картой (RUB/USD)", callback_data=f"pay:platega:{plan_id}"))
     builder.row(_btn(text="CryptoBot", callback_data=f"pay:cryptobot:{plan_id}"))
+    builder.row(_btn(text="TON (прямой)", callback_data=f"pay:ton:{plan_id}"))
     if support_username:
         builder.row(_btn(text="💬 Поддержка", url=f"https://t.me/{support_username.lstrip('@')}"))
     builder.row(_btn(text="Назад", callback_data="sub:plans"))
@@ -430,8 +431,7 @@ def payment_waiting_kb(url: str, payment_id: int, provider: str, support_usernam
 
 def ton_payment_kb(deeplink: str, tonkeeper_url: str, payment_id: int, support_username: str = "") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(_btn(text="Оплатить в TON (URI)", url=deeplink))
-    builder.row(_btn(text="📲 Tonkeeper", url=tonkeeper_url))
+    builder.row(_btn(text="📲 Оплатить через Tonkeeper", url=tonkeeper_url))
     builder.row(_btn(text="Проверить оплату", callback_data=f"pay:check:ton:{payment_id}"))
     if support_username:
         builder.row(_btn(text="💬 Поддержка", url=f"https://t.me/{support_username.lstrip('@')}"))
