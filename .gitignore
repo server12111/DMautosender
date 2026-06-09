@@ -3,7 +3,8 @@ __pycache__/
 *.pyo
 *.pyd
 .env
-data/
+data/*
+!data/.gitkeep
 sessions/
 *.session
 *.session-journal

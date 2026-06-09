@@ -101,6 +101,19 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import sys
+    import time
+    import traceback
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    asyncio.run(main())
+    _RESTART_DELAY = 5
+    while True:
+        try:
+            asyncio.run(main())
+            break
+        except (KeyboardInterrupt, SystemExit):
+            print("Остановлено пользователем.")
+            break
+        except Exception:
+            print(f"\n=== КРАШ ===\n{traceback.format_exc()}")
+            print(f"Перезапуск через {_RESTART_DELAY} сек...")
+            time.sleep(_RESTART_DELAY)
