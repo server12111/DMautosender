@@ -410,7 +410,6 @@ def plans_kb(pro_price: str, biz_price: str, support_username: str = "") -> Inli
             continue
         price = pro_price if plan_id == "pro" else biz_price
         builder.row(_btn(text=f"{info['emoji']} {info['label']} — {price}/мес", callback_data=f"sub:select:{plan_id}"))
-    builder.row(_support_btn(support_username))
     builder.row(_btn(text="Назад", callback_data="menu:main"))
     return builder.as_markup()
 
@@ -419,7 +418,6 @@ def payment_provider_kb(plan_id: str, support_username: str = "") -> InlineKeybo
     builder.row(_btn(text="Картой (RUB/USD)", callback_data=f"pay:platega:{plan_id}"))
     builder.row(_btn(text="CryptoBot", callback_data=f"pay:cryptobot:{plan_id}"))
     builder.row(_btn(text="TON (прямой)", callback_data=f"pay:ton:{plan_id}"))
-    builder.row(_support_btn(support_username))
     builder.row(_btn(text="Назад", callback_data="sub:plans"))
     return builder.as_markup()
 
