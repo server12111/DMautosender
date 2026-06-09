@@ -67,7 +67,6 @@ class UserbotManager:
         return client
 
     def _make_new_client(self, phone: str, api_id: int, api_hash: str) -> TelegramClient:
-        logger.info("DEBUG _make_new_client: phone=%s, api_id=%s (type %s), api_hash=%s (type %s)", phone, api_id, type(api_id), api_hash, type(api_hash))
         device = _DEVICE_POOL[0]
         session_name = str(self._sessions_path / phone.replace("+", ""))
         client = TelegramClient(
@@ -192,13 +191,7 @@ class UserbotManager:
         self._pending_proxy = proxy
         client = self._make_new_client(phone, api_id, api_hash)
         await client.connect()
-        logger.info("DEBUG BEFORE send_code_request: client.api_id=%r, client.api_hash=%r, phone=%r", client.api_id, client.api_hash, phone)
-        try:
-            result = await client.send_code_request(phone)
-        except Exception as e:
-            import traceback
-            logger.error("Crash exactly in send_code_request:\n%s", traceback.format_exc())
-            raise e
+        result = await client.send_code_request(phone)
         self._pending_client = client
         self._pending_phone = phone
         self._pending_phone_code_hash = result.phone_code_hash
@@ -262,6 +255,7 @@ class UserbotManager:
         self._pending_phone = None
         self._pending_phone_code_hash = None
         self._pending_user_id = 0
+        self._pending_proxy = None
 
     async def remove_account(self, account_id: int) -> None:
         if account_id in self._clients:

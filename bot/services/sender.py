@@ -191,15 +191,15 @@ class MailingSender:
 
                 # Проверяем есть ли ещё необработанные и настроена ли пауза
                 remaining = await self._db.get_unprocessed_identifiers(self._campaign_id)
-                if not remaining or self._self._self._config.pause_between_cycles <= 0:
+                if not remaining or self._config.pause_between_cycles <= 0:
                     break
 
                 await self._log(
-                    f"⏸ Пауза между циклами: {self._self._config.pause_between_cycles}с "
+                    f"⏸ Пауза между циклами: {self._config.pause_between_cycles}с "
                     f"(осталось {len(remaining)} пользователей)..."
                 )
                 # Спим кусками по 1с чтобы stop() срабатывал быстро
-                for _ in range(int(self._self._config.pause_between_cycles)):
+                for _ in range(int(self._config.pause_between_cycles)):
                     if self._stop_event.is_set():
                         break
                     await asyncio.sleep(1)
@@ -243,7 +243,7 @@ class MailingSender:
                 continue
 
             try:
-                await self._send_to_user(client, identifier, self._campaign)
+                await self._send_to_user(client, identifier, self._config)
                 await self._db.mark_sent(self._campaign_id, identifier, account_id, "sent")
                 self._stats.sent += 1
                 await self._log(f"✅ [{acc_label}] → {identifier}")

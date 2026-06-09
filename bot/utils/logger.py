@@ -16,9 +16,12 @@ def setup_logging(logs_path: Path) -> logging.Logger:
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setFormatter(formatter)
 
-    # UTF-8 вывод в консоль на Windows
-    utf8_stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    stream_handler = logging.StreamHandler(utf8_stdout)
+    # UTF-8 вывод в консоль (Windows требует явной обёртки)
+    try:
+        utf8_stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        stream_handler = logging.StreamHandler(utf8_stdout)
+    except AttributeError:
+        stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
 
     root = logging.getLogger()
