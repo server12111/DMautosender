@@ -520,3 +520,9 @@ def api_id_kb(back_data: str = "menu:cancel") -> InlineKeyboardMarkup:
     builder.row(_btn(text="Использовать стандартный (0)", callback_data="add_acc:use_default_api"))
     builder.row(_btn(text="Назад", callback_data=back_data))
     return builder.as_markup()
+
+def api_hash_kb(back_data: str = "accounts:list") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(_btn(text="Использовать стандартный (0)", callback_data="add_acc:use_default_api_hash"))
+    builder.row(_btn(text="Назад", callback_data=back_data))
+    return builder.as_markup()

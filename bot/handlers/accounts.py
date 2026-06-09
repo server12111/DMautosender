@@ -16,7 +16,7 @@ from telethon.errors import (
 
 from ..keyboards.inline import (
     accounts_list_kb, account_actions_kb, account_delete_confirm_kb,
-    cancel_kb, back_to_menu_kb, main_menu_kb, skip_proxy_kb, code_pad_kb, api_id_kb,
+    cancel_kb, back_to_menu_kb, main_menu_kb, skip_proxy_kb, code_pad_kb, api_id_kb, api_hash_kb,
 )
 from ..database.db import Database
 from ..database.models import BotUser
@@ -210,7 +210,7 @@ async def fsm_api_id(message: Message, state: FSMContext) -> None:
 
     await state.update_data(api_id=int(text))
     await state.set_state(AddAccountStates.api_hash)
-    await message.answer("Шаг 2/5. Введите <b>API Hash</b>:", reply_markup=cancel_kb("accounts:list"), parse_mode="HTML")
+    await message.answer("Шаг 2/5. Введите <b>API Hash</b>:", reply_markup=api_hash_kb(), parse_mode="HTML")
 
 
 @router.message(StateFilter(AddAccountStates.api_hash))
@@ -569,13 +569,13 @@ async def cb_use_default_api(callback: CallbackQuery, state: FSMContext) -> None
     await state.set_state(AddAccountStates.api_hash)
     await callback.message.edit_text(
         "Выбран стандартный API ID.\n"
-        "Теперь отправьте ваш <b>API Hash</b> (или 0 для стандартного):",
-        reply_markup=cancel_kb("accounts:list"),
+        "Теперь отправьте ваш <b>API Hash</b>:",
+        reply_markup=api_hash_kb(),
         parse_mode="HTML"
     )
     await callback.answer()
 
-@router.callback_query(F.data == "add_acc:use_default_api", StateFilter(AddAccountStates.api_hash))
+@router.callback_query(F.data == "add_acc:use_default_api_hash", StateFilter(AddAccountStates.api_hash))
 async def cb_use_default_api_hash(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(api_hash="0")
     await state.set_state(AddAccountStates.phone)
