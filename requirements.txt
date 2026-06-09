@@ -5,3 +5,4 @@ python-dotenv>=1.0.0
 PySocks>=1.7.1
 python-socks>=2.4.3
 aiohttp>=3.9.0
+opentele>=1.15.1
