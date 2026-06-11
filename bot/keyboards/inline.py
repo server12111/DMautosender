@@ -6,8 +6,20 @@ from ..database.models import Account, Campaign, Subscription, PLAN_LIMITS
 from ..config import config
 
 
+_VALID_STYLES = {"danger", "success", "primary"}
+
 def _btn(text: str, callback_data: str = None, url: str = None, style: str = None) -> InlineKeyboardButton:
+    if style not in _VALID_STYLES:
+        # Auto-detect style from button text
+        if any(w in text for w in ("Назад", "Отмена", "Удалить", "Нет", "Стереть", "Отключить", "Заблокировать")):
+            style = "danger"
+        elif any(w in text for w in ("✅", "Подтвердить", "Да,", "Добавить", "Запустить", "Продолжить", "Активировать", "Включить", "Оплатить", "Разблокировать")):
+            style = "success"
+        else:
+            style = None
     kwargs = {"text": text}
+    if style:
+        kwargs["style"] = style
     if url:
         kwargs["url"] = url
     else:
@@ -176,26 +188,26 @@ def code_pad_kb(code: str) -> InlineKeyboardMarkup:
     
     # Numbers 1-3
     b.row(
-        _btn(text="1", callback_data="code_pad:1", style="secondary"),
-        _btn(text="2", callback_data="code_pad:2", style="secondary"),
-        _btn(text="3", callback_data="code_pad:3", style="secondary")
+        _btn(text="1", callback_data="code_pad:1", style="primary"),
+        _btn(text="2", callback_data="code_pad:2", style="primary"),
+        _btn(text="3", callback_data="code_pad:3", style="primary")
     )
     # Numbers 4-6
     b.row(
-        _btn(text="4", callback_data="code_pad:4", style="secondary"),
-        _btn(text="5", callback_data="code_pad:5", style="secondary"),
-        _btn(text="6", callback_data="code_pad:6", style="secondary")
+        _btn(text="4", callback_data="code_pad:4", style="primary"),
+        _btn(text="5", callback_data="code_pad:5", style="primary"),
+        _btn(text="6", callback_data="code_pad:6", style="primary")
     )
     # Numbers 7-9
     b.row(
-        _btn(text="7", callback_data="code_pad:7", style="secondary"),
-        _btn(text="8", callback_data="code_pad:8", style="secondary"),
-        _btn(text="9", callback_data="code_pad:9", style="secondary")
+        _btn(text="7", callback_data="code_pad:7", style="primary"),
+        _btn(text="8", callback_data="code_pad:8", style="primary"),
+        _btn(text="9", callback_data="code_pad:9", style="primary")
     )
     # Numbers *, 0, Delete
     b.row(
-        _btn(text="*", callback_data="code_pad:ignore", style="secondary"),
-        _btn(text="0", callback_data="code_pad:0", style="secondary"),
+        _btn(text="*", callback_data="code_pad:ignore", style="primary"),
+        _btn(text="0", callback_data="code_pad:0", style="primary"),
         _btn(text="◀️ Стереть", callback_data="code_pad:del", style="danger")
     )
     
