@@ -3,6 +3,7 @@ import logging
 from aiogram.filters import StateFilter
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
+from aiogram.exceptions import TelegramBadRequest
 
 from ..keyboards.inline import mailing_status_kb, back_to_menu_kb, campaign_menu_kb
 from ..database.db import Database
@@ -114,7 +115,10 @@ async def cb_mailing_start(
 
     if errors:
         msg = "<b>Не удалось запустить рассылку:</b>\n" + "\n".join(errors)
-        await callback.message.edit_text(msg, reply_markup=campaign_menu_kb(campaign), parse_mode="HTML")
+        try:
+            await callback.message.edit_text(msg, reply_markup=campaign_menu_kb(campaign), parse_mode="HTML")
+        except TelegramBadRequest:
+            pass
         await callback.answer()
         return
 
