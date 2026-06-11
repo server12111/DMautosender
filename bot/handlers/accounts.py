@@ -208,7 +208,16 @@ async def fsm_api_id(message: Message, state: FSMContext) -> None:
         await message.answer("❌ API ID должен быть числом. Попробуйте ещё раз:", reply_markup=api_id_kb("accounts:list"))
         return
 
-    await state.update_data(api_id=int(text))
+    api_id_int = int(text)
+    if api_id_int > 2147483647 or api_id_int < 1:
+        await message.answer(
+            "❌ Неверный API ID. Это должно быть число от 1 до 2147483647.\n\n"
+            "Вы случайно ввели номер телефона? API ID берётся с <a href='https://my.telegram.org'>my.telegram.org</a>",
+            reply_markup=api_id_kb("accounts:list"), parse_mode="HTML", disable_web_page_preview=True
+        )
+        return
+
+    await state.update_data(api_id=api_id_int)
     await state.set_state(AddAccountStates.api_hash)
     await message.answer("Шаг 2/5. Введите <b>API Hash</b>:", reply_markup=api_hash_kb(), parse_mode="HTML")
 
@@ -565,7 +574,7 @@ async def mass_add_zip(message: Message, state: FSMContext, db: Database, manage
 
 @router.callback_query(F.data == "add_acc:use_default_api", StateFilter(AddAccountStates.api_id))
 async def cb_use_default_api(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(api_id="0")
+    await state.update_data(api_id=config.DEFAULT_API_ID)
     await state.set_state(AddAccountStates.api_hash)
     await callback.message.edit_text(
         "Выбран стандартный API ID.\n"
@@ -577,7 +586,7 @@ async def cb_use_default_api(callback: CallbackQuery, state: FSMContext) -> None
 
 @router.callback_query(F.data == "add_acc:use_default_api_hash", StateFilter(AddAccountStates.api_hash))
 async def cb_use_default_api_hash(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(api_hash="0")
+    await state.update_data(api_id=config.DEFAULT_API_ID, api_hash=config.DEFAULT_API_HASH)
     await state.set_state(AddAccountStates.phone)
     await callback.message.edit_text(
         "Выбран стандартный API Hash.\n"
