@@ -5,5 +5,9 @@ services:
     build: .
     restart: always
     env_file: .env
+    environment:
+      DATABASE_PATH: /app/data/bot.db
+      SESSIONS_PATH: /app/data/sessions
+      LOGS_PATH: /app/data/logs
     volumes:
       - ./data:/app/data

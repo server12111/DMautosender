@@ -7,10 +7,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV DATABASE_PATH=data/bot.db
-ENV SESSIONS_PATH=data/sessions
-ENV LOGS_PATH=data/logs
+ENV DATABASE_PATH=/app/data/bot.db
+ENV SESSIONS_PATH=/app/data/sessions
+ENV LOGS_PATH=/app/data/logs
 
 RUN mkdir -p data/sessions data/logs
+
+VOLUME ["/app/data"]
 
 CMD ["python", "run.py"]
