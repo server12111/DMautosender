@@ -1,4 +1,6 @@
+import html
 import logging
+import math
 from ..utils.emoji import e
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
@@ -30,7 +32,7 @@ def _delays_text(c: Campaign) -> str:
     return (
         f"{e('⏱')} <b>НАСТРОЙКИ ЗАДЕРЖЕК</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"{e('📢')} Рассылка: <b>{c.name}</b>\n\n"
+        f"{e('📢')} Рассылка: <b>{html.escape(c.name)}</b>\n\n"
         f"{e('⚙️')} <b>Параметры:</b>\n"
         f" ├ <b>Режим:</b> {mode}\n"
         f"{delay_info}\n"
@@ -109,7 +111,7 @@ async def fsm_delay_fixed(message: Message, state: FSMContext, db: Database) -> 
     if not campaign_id:
         return await state.clear()
         
-    text = message.text.strip().replace(",", ".")
+    text = (message.text or "").strip().replace(",", ".")
     
     if "-" in text:
         parts = text.split("-")
@@ -117,7 +119,13 @@ async def fsm_delay_fixed(message: Message, state: FSMContext, db: Database) -> 
             try:
                 min_val = float(parts[0].strip())
                 max_val = float(parts[1].strip())
-                if min_val > 0 and max_val > 0 and min_val < max_val:
+                if (
+                    math.isfinite(min_val)
+                    and math.isfinite(max_val)
+                    and min_val > 0
+                    and max_val > 0
+                    and min_val < max_val
+                ):
                     campaign = await db.get_campaign(campaign_id)
                     await db.update_campaign_delays(
                         campaign_id, "random", campaign.delay_fixed, min_val, max_val, campaign.pause_cycles
@@ -135,7 +143,7 @@ async def fsm_delay_fixed(message: Message, state: FSMContext, db: Database) -> 
 
     try:
         val = float(text)
-        if val <= 0:
+        if not math.isfinite(val) or val <= 0:
             raise ValueError
     except ValueError:
         return await message.answer("❌ Пожалуйста, введите положительное число (например, 15) или диапазон (например, 10-20):", reply_markup=cancel_kb(f"campaign:view:{campaign_id}"))
@@ -159,8 +167,8 @@ async def fsm_delay_min(message: Message, state: FSMContext, db: Database) -> No
     data = await state.get_data()
     campaign_id = data.get("campaign_id")
     try:
-        val = float(message.text.strip().replace(",", "."))
-        if val <= 0:
+        val = float((message.text or "").strip().replace(",", "."))
+        if not math.isfinite(val) or val <= 0:
             raise ValueError
     except ValueError:
         return await message.answer("❌ Пожалуйста, введите положительное число:", reply_markup=cancel_kb(f"campaign:view:{campaign_id}"))
@@ -185,8 +193,8 @@ async def fsm_delay_max(message: Message, state: FSMContext, db: Database) -> No
     campaign_id = data.get("campaign_id")
     
     try:
-        val = float(message.text.strip().replace(",", "."))
-        if val <= min_val:
+        val = float((message.text or "").strip().replace(",", "."))
+        if not math.isfinite(val) or val <= min_val:
             return await message.answer(f"❌ Максимальная задержка должна быть больше минимальной ({min_val}). Повторите ввод:", reply_markup=cancel_kb(f"campaign:view:{campaign_id}"))
     except ValueError:
         return await message.answer("❌ Введите корректное число:", reply_markup=cancel_kb(f"campaign:view:{campaign_id}"))
@@ -227,8 +235,8 @@ async def fsm_delay_pause(message: Message, state: FSMContext, db: Database) -> 
         return await state.clear()
         
     try:
-        val = float(message.text.strip().replace(",", "."))
-        if val < 0:
+        val = float((message.text or "").strip().replace(",", "."))
+        if not math.isfinite(val) or val < 0:
             raise ValueError
     except ValueError:
         return await message.answer("❌ Введите положительное число или 0:", reply_markup=cancel_kb(f"campaign:view:{campaign_id}"))

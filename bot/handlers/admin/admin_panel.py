@@ -17,13 +17,22 @@ async def cb_admin_panel(callback: CallbackQuery, db: Database) -> None:
     users_count = await db.count_users()
     subs_count = await db.count_active_subscriptions()
     all_payments = await db.get_all_payments(limit=1000)
-    total_paid = sum(p.amount for p in all_payments if p.status == "paid")
+    paid_totals: dict[str, float] = {}
+    for payment in all_payments:
+        if payment.status == "paid":
+            paid_totals[payment.currency] = (
+                paid_totals.get(payment.currency, 0.0) + payment.amount
+            )
+    turnover = ", ".join(
+        f"{amount:.2f} {currency}"
+        for currency, amount in sorted(paid_totals.items())
+    ) or "0"
 
     text = (
         f"{e('⚙️')} <b>Панель администратора</b>\n\n"
         f"{e('👥')} Пользователей: <b>{users_count}</b>\n"
         f"{e('💳')} Активных подписок: <b>{subs_count}</b>\n"
-        f"{e('💰')} Оборот: <b>${total_paid:.2f}</b>\n\n"
+        f"{e('💰')} Оборот (последние 1000 платежей): <b>{turnover}</b>\n\n"
         f"Выберите раздел:"
     )
     try:

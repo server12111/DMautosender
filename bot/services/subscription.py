@@ -53,20 +53,12 @@ class SubscriptionService:
             except Exception:
                 pass
 
-        if promo.used_count >= promo.max_uses:
+        if promo.max_uses >= 0 and promo.used_count >= promo.max_uses:
             return False, "❌ Промокод исчерпан (все активации использованы)."
 
-        ok = await self._db.use_promo(promo.id, user_id)
-        if not ok:
+        sub = await self._db.redeem_promo(promo.id, user_id)
+        if not sub:
             return False, "❌ Вы уже активировали этот промокод."
-
-        sub = await self._db.create_subscription(
-            user_id=user_id,
-            plan=promo.plan,
-            duration_days=promo.duration_days,
-            provider="promo",
-            payment_id=f"promo:{promo.code}",
-        )
 
         plan_info = PLAN_LIMITS.get(promo.plan, {})
         label = plan_info.get("label", promo.plan.upper())

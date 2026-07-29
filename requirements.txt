@@ -6,3 +6,4 @@ PySocks>=1.7.1
 python-socks>=2.4.3
 aiohttp>=3.9.0
 opentele>=1.15.1
+psutil>=5.9.0

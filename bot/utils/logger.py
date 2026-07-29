@@ -1,6 +1,5 @@
 import logging
 import sys
-import io
 from pathlib import Path
 from datetime import datetime
 
@@ -16,17 +15,19 @@ def setup_logging(logs_path: Path) -> logging.Logger:
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setFormatter(formatter)
 
-    # UTF-8 вывод в консоль (Windows требует явной обёртки)
+    # UTF-8 вывод в консоль (Windows требует явной настройки)
     try:
-        utf8_stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        stream_handler = logging.StreamHandler(utf8_stdout)
-    except AttributeError:
-        stream_handler = logging.StreamHandler(sys.stdout)
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    root.handlers.clear()
+    for old_handler in list(root.handlers):
+        root.removeHandler(old_handler)
+        old_handler.close()
     root.addHandler(file_handler)
     root.addHandler(stream_handler)
 

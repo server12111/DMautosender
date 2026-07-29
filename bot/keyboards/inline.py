@@ -65,7 +65,8 @@ def campaigns_list_kb(campaigns: list[Campaign]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for c in campaigns:
         status_emoji = "⏳" if c.status == "draft" else "🚀" if c.status == "running" else "✅" if c.status == "completed" else "⏸"
-        builder.row(_btn(text=f"{status_emoji} {c.name}", callback_data=f"campaign:view:{c.id}"))
+        label = c.name if len(c.name) <= 48 else c.name[:47] + "…"
+        builder.row(_btn(text=f"{status_emoji} {label}", callback_data=f"campaign:view:{c.id}"))
     
     builder.row(_btn(text="Создать рассылку", callback_data="campaigns:create"))
     builder.row(_main_btn())
@@ -98,6 +99,11 @@ def campaign_view_kb(camp: Campaign) -> InlineKeyboardMarkup:
         builder.row(_btn(text="Остановить", callback_data=f"mailing:stop:{camp.id}"))
     elif camp.status == "paused":
         builder.row(_btn(text="Продолжить", callback_data=f"mailing:start:{camp.id}"))
+
+    builder.row(
+        _btn(text="📊 Статистика", callback_data=f"stats:show:{camp.id}"),
+        _btn(text="📋 Логи", callback_data=f"logs:show:{camp.id}:0"),
+    )
     
     if camp.status != "running":
         builder.row(_btn(text="Удалить рассылку", callback_data=f"campaign:delete:{camp.id}"))
@@ -132,6 +138,8 @@ def accounts_list_kb(accounts: list[Account]) -> InlineKeyboardMarkup:
         label = f"{status_icon} {acc.phone}"
         if acc.name:
             label += f" ({acc.name})"
+        if len(label) > 60:
+            label = label[:59] + "…"
         builder.row(_btn(text=label, callback_data=f"accounts:view:{acc.id}"))
         
     builder.row(_btn(text="Добавить аккаунт", callback_data="accounts:add"))
@@ -248,8 +256,12 @@ def cancel_to_profile_kb() -> InlineKeyboardMarkup:
 # --- Admin ---
 def admin_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(_btn(text="Пользователи", callback_data="admin:users:1"))
+    builder.row(_btn(text="Пользователи", callback_data="admin:users:0"))
     builder.row(_btn(text="Настройки бота", callback_data="admin:settings"))
+    builder.row(
+        _btn(text="Платежи", callback_data="admin:payments"),
+        _btn(text="Статус системы", callback_data="admin:system_status"),
+    )
     builder.row(_btn(text="Рассылка", callback_data="admin:broadcast:prepare"))
     builder.row(_btn(text="Создать промокод", callback_data="admin:promo:create"))
     builder.row(_main_btn())
@@ -292,12 +304,8 @@ def tools_parser_kb() -> InlineKeyboardMarkup:
 # Missing from earlier
 def account_actions_kb(account_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(_btn(text="Переподключить", callback_data=f"accounts:reconnect:{account_id}"))
-    builder.row(
-        _btn(text="Отключить", callback_data=f"accounts:toggle:{account_id}"),
-        _btn(text="Включить", callback_data=f"accounts:toggle:{account_id}")
-    )
-    builder.row(_btn(text="Удалить", callback_data=f"accounts:delete:{account_id}"))
+    builder.row(_btn(text="🔄 Переподключить", callback_data=f"accounts:reconnect:{account_id}"))
+    builder.row(_btn(text="🗑 Удалить", callback_data=f"accounts:delete:{account_id}"))
     builder.row(_btn(text="К списку", callback_data="accounts:list"))
     return builder.as_markup()
 
@@ -323,7 +331,14 @@ def database_menu_kb(campaign_id: int, stats: dict = None) -> InlineKeyboardMark
 def compose_menu_kb(campaign_id: int, has_image: bool = False, has_file: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(_btn(text="Изменить текст", callback_data=f"compose:edit_text:{campaign_id}"))
-    builder.row(_btn(text="🖼 Изменить фото/видео", callback_data=f"compose:set_image:{campaign_id}"))
+    builder.row(
+        _btn(text="🖼 Изменить фото", callback_data=f"compose:set_image:{campaign_id}"),
+        _btn(text="📎 Изменить файл", callback_data=f"compose:set_file:{campaign_id}"),
+    )
+    builder.row(
+        _btn(text="👁 Предпросмотр", callback_data=f"compose:preview:{campaign_id}"),
+        _btn(text="HTML", callback_data=f"compose:format_help:{campaign_id}"),
+    )
     if has_image or has_file:
         builder.row(_btn(text="Удалить медиа", callback_data=f"compose:clear_attach:{campaign_id}"))
     builder.row(_btn(text="Назад", callback_data=f"campaign:view:{campaign_id}"))
@@ -334,8 +349,14 @@ def delays_menu_kb(campaign_id: int, delay_mode: str) -> InlineKeyboardMarkup:
     modes = [("Фиксированная", "fixed"), ("Случайная", "random")]
     for name, code in modes:
         marker = "✅ " if code == delay_mode else ""
-        builder.row(_btn(text=f"{marker}{name}", callback_data=f"delays:edit:{campaign_id}:{code}"))
-    builder.row(_btn(text="Изменить время (сек)", callback_data=f"delays:set_fixed:{campaign_id}"))
+        builder.row(
+            _btn(
+                text=f"{marker}{name}",
+                callback_data=f"delays:set_{code}:{campaign_id}",
+            )
+        )
+    builder.row(_btn(text="Изменить время (сек)", callback_data=f"delays:edit:{campaign_id}"))
+    builder.row(_btn(text="Пауза между циклами", callback_data=f"delays:set_pause:{campaign_id}"))
     builder.row(_btn(text="Назад", callback_data=f"campaign:view:{campaign_id}"))
     return builder.as_markup()
 
@@ -357,13 +378,14 @@ def stats_kb(campaign_id: int) -> InlineKeyboardMarkup:
 def logs_kb(campaign_id: int, page: int, total_pages: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     row = []
-    if page > 1:
+    if page > 0:
         row.append(_btn(text="⬅️", callback_data=f"logs:show:{campaign_id}:{page-1}"))
-    if page < total_pages:
+    if page < total_pages - 1:
         row.append(_btn(text="➡️", callback_data=f"logs:show:{campaign_id}:{page+1}"))
     if row:
         builder.row(*row)
     builder.row(_btn(text="Обновить", callback_data=f"logs:show:{campaign_id}:{page}"))
+    builder.row(_btn(text="Скачать TXT", callback_data=f"logs:download:{campaign_id}"))
     builder.row(_btn(text="Назад", callback_data=f"campaign:view:{campaign_id}"))
     return builder.as_markup()
 
@@ -373,7 +395,10 @@ def campaign_accounts_kb(campaign_id: int, user_accounts: list[Account], assigne
     builder = InlineKeyboardBuilder()
     for acc in user_accounts:
         marker = "✅" if acc.id in assigned_account_ids else "❌"
-        builder.row(_btn(text=f"{marker} {acc.phone} ({acc.name or 'Без имени'})", callback_data=f"campaign:toggle_acc:{campaign_id}:{acc.id}"))
+        label = f"{marker} {acc.phone} ({acc.name or 'Без имени'})"
+        if len(label) > 60:
+            label = label[:59] + "…"
+        builder.row(_btn(text=label, callback_data=f"campaign:toggle_acc:{campaign_id}:{acc.id}"))
     builder.row(_btn(text="Назад", callback_data=f"campaign:view:{campaign_id}"))
     return builder.as_markup()
 
@@ -473,9 +498,9 @@ def admin_users_kb(users: list, page: int, total: int, per_page: int) -> InlineK
     import math
     total_pages = math.ceil(total / per_page)
     row = []
-    if page > 1:
+    if page > 0:
         row.append(_btn(text="⬅️", callback_data=f"admin:users:{page-1}"))
-    if page < total_pages:
+    if page < total_pages - 1:
         row.append(_btn(text="➡️", callback_data=f"admin:users:{page+1}"))
     if row:
         builder.row(*row)
@@ -493,7 +518,7 @@ def admin_user_actions_kb(user_id: int, is_banned: bool) -> InlineKeyboardMarkup
         _btn(text="⭐ Выдать PRO", callback_data=f"admin:grant:pro:30:{user_id}"),
         _btn(text="💎 Выдать BIZ", callback_data=f"admin:grant:business:30:{user_id}")
     )
-    builder.row(_btn(text="🔙 Назад", callback_data="admin:users:1"))
+    builder.row(_btn(text="🔙 Назад", callback_data="admin:users:0"))
     return builder.as_markup()
 
 def api_id_kb(back_data: str = "menu:cancel") -> InlineKeyboardMarkup:

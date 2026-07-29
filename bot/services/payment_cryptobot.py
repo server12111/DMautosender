@@ -57,10 +57,19 @@ async def create_invoice(
                 logger.debug("CryptoBot createInvoice: %s", data)
                 if data.get("ok") and data.get("result"):
                     result = data["result"]
+                    pay_url = (
+                        result.get("bot_invoice_url")
+                        or result.get("mini_app_invoice_url")
+                        or result.get("web_app_invoice_url")
+                        or result.get("pay_url")
+                    )
+                    if not pay_url:
+                        logger.error("CryptoBot response has no invoice URL: %s", result)
+                        return None
                     return {
                         "invoice_id": result["invoice_id"],
-                        "pay_url": result["pay_url"],
-                        "bot_invoice_url": result.get("bot_invoice_url", result["pay_url"]),
+                        "pay_url": pay_url,
+                        "bot_invoice_url": result.get("bot_invoice_url", pay_url),
                     }
                 logger.error("CryptoBot error: %s", data)
                 return None
@@ -79,13 +88,20 @@ async def check_invoice_status(invoice_id: int) -> Optional[str]:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{BASE_URL}/getInvoices",
-                json={"invoice_ids": [invoice_id]},
+                json={"invoice_ids": str(invoice_id)},
                 headers=_headers(),
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 data = await resp.json()
-                if data.get("ok") and data.get("result", {}).get("items"):
-                    return data["result"]["items"][0]["status"]
+                result = data.get("result")
+                if isinstance(result, dict):
+                    invoices = result.get("items", [])
+                elif isinstance(result, list):
+                    invoices = result
+                else:
+                    invoices = []
+                if data.get("ok") and invoices:
+                    return invoices[0].get("status")
                 return None
     except Exception as e:
         logger.error("CryptoBot getInvoices exception: %s", e)

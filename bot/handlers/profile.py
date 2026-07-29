@@ -2,6 +2,7 @@
 User profile handler.
 Shows subscription status, promo activation, support link, legal docs.
 """
+import html
 import logging
 from aiogram import Router, F
 from aiogram.filters import StateFilter
@@ -58,7 +59,7 @@ async def _profile_text(user: BotUser, db: Database) -> str:
         f"{e('🤝')} <b>ПАРТНЕРСКАЯ ПРОГРАММА</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"<i>{e('🎁')} Приглашайте друзей и получайте <b>10%</b> от их покупок прямо на баланс!</i>\n\n"
-        f"{e('🔗')} Ваша ссылка: <code>{ref_link}</code>\n"
+        f"{e('🔗')} Ваша ссылка: <code>{html.escape(ref_link)}</code>\n"
         f"{e('👥')} Приглашено: <b>{referrals_count}</b> чел.\n"
         f"{e('💳')} <b>Ваш баланс:</b> <b>${user.balance:.2f}</b>"
     )

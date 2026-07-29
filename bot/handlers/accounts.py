@@ -1,4 +1,10 @@
+import html
 import logging
+import os
+import shutil
+import tempfile
+import zipfile
+import uuid
 from ..utils.emoji import e
 from aiogram import Router, F, Bot
 from aiogram.filters import StateFilter
@@ -27,6 +33,44 @@ from ..config import config
 logger = logging.getLogger("dmsender.accounts")
 
 router = Router()
+
+MAX_ZIP_MEMBERS = 2_000
+MAX_ZIP_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+
+
+def _safe_extract_zip(zip_ref: zipfile.ZipFile, destination: str) -> None:
+    """Extract an archive without allowing paths outside ``destination``."""
+    base = os.path.realpath(destination)
+    members = zip_ref.infolist()
+    if len(members) > MAX_ZIP_MEMBERS:
+        raise ValueError("Слишком много файлов в архиве")
+    if sum(member.file_size for member in members) > MAX_ZIP_UNCOMPRESSED_BYTES:
+        raise ValueError("Архив слишком большой после распаковки")
+    for member in members:
+        target = os.path.realpath(os.path.join(base, member.filename))
+        if target != base and not target.startswith(base + os.sep):
+            raise ValueError("Архив содержит небезопасный путь")
+    zip_ref.extractall(base)
+
+
+async def _install_session_file(
+    source: str,
+    destination: str,
+    existing_account_id: int | None,
+    manager: UserbotManager,
+) -> None:
+    """Atomically replace a session after its live client is disconnected."""
+    staging = f"{destination}.tmp_{uuid.uuid4().hex}"
+    try:
+        shutil.copy2(source, staging)
+        if existing_account_id is not None:
+            await manager.disconnect_account(existing_account_id)
+        os.replace(staging, destination)
+    finally:
+        try:
+            os.remove(staging)
+        except FileNotFoundError:
+            pass
 
 
 class AddAccountStates(StatesGroup):
@@ -110,7 +154,7 @@ async def cb_account_view(
         f"{e('📱')} <b>УПРАВЛЕНИЕ АККАУНТОМ</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"{e('📞')} <b>Телефон:</b> <code>{acc.phone}</code>\n"
-        f"{e('👤')} <b>Имя:</b> {acc.name or '—'}\n"
+        f"{e('👤')} <b>Имя:</b> {html.escape(acc.name or '—')}\n"
         f"{e('🔑')} <b>API ID:</b> <code>{acc.api_id}</code>\n\n"
         f"{e('🔄')} <b>Статус:</b> {status_icon} <b>{status_text}</b>\n"
     )
@@ -135,7 +179,7 @@ async def cb_account_reconnect(
 async def cb_account_delete_ask(callback: CallbackQuery) -> None:
     account_id = int(callback.data.split(":")[2])
     await callback.message.edit_text(
-        "🗑 <b>Удалить аккаунт?</b>\n\nЗапись в БД удалится, сессия на диске останется.",
+        "🗑 <b>Удалить аккаунт?</b>\n\nЗапись в БД и локальный файл сессии будут удалены.",
         reply_markup=account_delete_confirm_kb(account_id),
         parse_mode="HTML",
     )
@@ -175,7 +219,7 @@ async def cb_accounts_add(
         )
         return
 
-    await manager.cancel_authorization()
+    await manager.cancel_authorization(callback.from_user.id)
     await state.clear()
     await state.set_state(AddAccountStates.api_id)
     text = (
@@ -249,7 +293,7 @@ async def cb_skip_proxy(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(StateFilter(AddAccountStates.proxy))
 async def fsm_proxy(message: Message, state: FSMContext) -> None:
-    proxy = message.text.strip()
+    proxy = (message.text or "").strip()
     from ..utils.proxy import parse_proxy
     if not parse_proxy(proxy):
         await message.answer(
@@ -287,7 +331,10 @@ async def fsm_phone(message: Message, state: FSMContext, manager: UserbotManager
     try:
         db_user = await db.get_user_by_tg_id(message.from_user.id)
         u_id = _get_user_id(db_user, message.from_user.id)
-        await manager.send_code(phone, api_id, api_hash, user_id=u_id, proxy=proxy)
+        await manager.send_code(
+            phone, api_id, api_hash, user_id=u_id, proxy=proxy,
+            auth_key=message.from_user.id,
+        )
     except PhoneNumberInvalidError:
         await status_msg.edit_text("❌ Неверный номер телефона.", reply_markup=cancel_kb("accounts:list"))
         return
@@ -329,7 +376,7 @@ async def cb_code_pad(callback: CallbackQuery, state: FSMContext, manager: Userb
         
         # trigger sign in
         try:
-            await manager.sign_in(code)
+            await manager.sign_in(code, callback.from_user.id)
         except SessionPasswordNeededError:
             await state.set_state(AddAccountStates.password)
             await callback.message.edit_text(
@@ -343,7 +390,10 @@ async def cb_code_pad(callback: CallbackQuery, state: FSMContext, manager: Userb
             return
         except Exception as e:
             logger.error("sign_in error: %s", e)
-            await callback.message.edit_text(f"❌ Ошибка входа: {e}", reply_markup=cancel_kb("accounts:list"))
+            await callback.message.edit_text(
+                f"❌ Ошибка входа: {html.escape(str(e))}",
+                reply_markup=cancel_kb("accounts:list"),
+            )
             return
 
         await _finish_auth(callback.message, state, manager)
@@ -369,7 +419,7 @@ async def fsm_code(message: Message, state: FSMContext, manager: UserbotManager)
         return
 
     try:
-        await manager.sign_in(code)
+        await manager.sign_in(code, message.from_user.id)
     except SessionPasswordNeededError:
         await state.set_state(AddAccountStates.password)
         await message.answer(
@@ -383,7 +433,10 @@ async def fsm_code(message: Message, state: FSMContext, manager: UserbotManager)
         return
     except Exception as e:
         logger.error("sign_in error: %s", e)
-        await message.answer(f"❌ Ошибка входа: {e}", reply_markup=cancel_kb("accounts:list"))
+        await message.answer(
+            f"❌ Ошибка входа: {html.escape(str(e))}",
+            reply_markup=cancel_kb("accounts:list"),
+        )
         return
 
     await _finish_auth(message, state, manager)
@@ -393,13 +446,16 @@ async def fsm_code(message: Message, state: FSMContext, manager: UserbotManager)
 async def fsm_password(message: Message, state: FSMContext, manager: UserbotManager) -> None:
     password = message.text or ""
     try:
-        await manager.sign_in_2fa(password)
+        await manager.sign_in_2fa(password, message.from_user.id)
     except PasswordHashInvalidError:
         await message.answer("❌ Неверный пароль 2FA. Попробуйте ещё раз:", reply_markup=cancel_kb("accounts:list"))
         return
     except Exception as e:
         logger.error("sign_in_2fa error: %s", e)
-        await message.answer(f"❌ Ошибка 2FA: {e}", reply_markup=cancel_kb("accounts:list"))
+        await message.answer(
+            f"❌ Ошибка 2FA: {html.escape(str(e))}",
+            reply_markup=cancel_kb("accounts:list"),
+        )
         return
 
     await _finish_auth(message, state, manager)
@@ -413,31 +469,29 @@ async def _finish_auth(
     await state.clear()
 
     try:
-        account = await manager.finish_authorization(data["api_id"], data["api_hash"])
+        account = await manager.finish_authorization(
+            data["api_id"], data["api_hash"], message.from_user.id
+        )
         logger.info("_finish_auth: аккаунт %s сохранён", account.phone)
         is_admin = message.from_user.id in config.ADMIN_IDS
         await message.answer(
             f"✅ <b>Аккаунт добавлен!</b>\n\n"
             f"{e('📱')} Телефон: <code>{account.phone}</code>\n"
-            f"{e('👤')} Имя: {account.name or '—'}\n\n"
+            f"{e('👤')} Имя: {html.escape(account.name or '—')}\n\n"
             f"Теперь можно загружать базу и запускать рассылку.",
             reply_markup=main_menu_kb(is_admin=is_admin),
             parse_mode="HTML",
         )
     except Exception as exc:
         logger.error("_finish_auth ошибка: %s", exc, exc_info=True)
-        await manager.cancel_authorization()
+        await manager.cancel_authorization(message.from_user.id)
         is_admin = message.from_user.id in config.ADMIN_IDS
         await message.answer(
-            f"❌ Ошибка сохранения аккаунта: {exc}\n\nПопробуйте добавить снова.",
+            f"❌ Ошибка сохранения аккаунта: {html.escape(str(exc))}\n\n"
+            "Попробуйте добавить снова.",
             reply_markup=main_menu_kb(is_admin=is_admin),
         )
 
-import os
-import shutil
-import zipfile
-import tempfile
-import asyncio
 from ..config import config
 from telethon import TelegramClient
 
@@ -456,6 +510,11 @@ async def cb_mass_add(callback: CallbackQuery, state: FSMContext, db: Database) 
     user = await db.get_user_by_tg_id(callback.from_user.id)
     if not user:
         return
+    svc = SubscriptionService(db)
+    current_count = await db.count_user_accounts(user.id)
+    if not await svc.can_add_account(user.id, current_count):
+        await callback.answer("❌ Лимит аккаунтов вашего тарифа исчерпан.", show_alert=True)
+        return
         
     await state.set_state(MassAddStates.waiting_zip)
     await callback.message.edit_text(
@@ -468,12 +527,25 @@ async def cb_mass_add(callback: CallbackQuery, state: FSMContext, db: Database) 
 
 @router.message(F.document, StateFilter(MassAddStates.waiting_zip))
 async def mass_add_zip(message: Message, state: FSMContext, db: Database, manager: UserbotManager, bot: Bot) -> None:
-    if not message.document.file_name.endswith('.zip'):
+    if not (message.document.file_name or "").lower().endswith('.zip'):
         await message.answer("❌ Пожалуйста, отправьте ZIP архив.", reply_markup=cancel_kb("accounts:list"))
         return
         
     user = await db.get_user_by_tg_id(message.from_user.id)
     if not user:
+        return
+    svc = SubscriptionService(db)
+    max_accounts = await svc.get_limit(user.id, "max_accounts")
+    current_count = await db.count_user_accounts(user.id)
+    available_slots = (
+        None if max_accounts == -1 else max(0, max_accounts - current_count)
+    )
+    if available_slots == 0:
+        await state.clear()
+        await message.answer(
+            "❌ Лимит аккаунтов вашего тарифа исчерпан.",
+            reply_markup=back_to_menu_kb(),
+        )
         return
         
     status_msg = await message.answer("⏳ Скачиваю архив...")
@@ -488,41 +560,73 @@ async def mass_add_zip(message: Message, state: FSMContext, db: Database, manage
         os.makedirs(extract_dir, exist_ok=True)
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
+                _safe_extract_zip(zip_ref, extract_dir)
         except Exception as e:
-            await status_msg.edit_text(f"❌ Ошибка чтения архива: {e}")
+            await status_msg.edit_text(
+                f"❌ Ошибка чтения архива: {html.escape(str(e))}"
+            )
             return
             
         added_count = 0
         error_count = 0
+        limit_reached = False
         
         for root, dirs, files in os.walk(extract_dir):
+            if limit_reached or (
+                available_slots is not None and added_count >= available_slots
+            ):
+                limit_reached = True
+                break
             if "tdata" in dirs:
                 tdata_path = os.path.join(root, "tdata")
                 if not _OPENTELE_AVAILABLE:
                     error_count += 1
                 else:
+                    client = None
+                    existing_account = None
                     try:
                         tdesk = TDesktop(tdata_path)
-                        temp_session = os.path.join(tmpdir, f"temp_{added_count}.session")
+                        temp_session = os.path.join(
+                            tmpdir, f"temp_{uuid.uuid4().hex}.session"
+                        )
                         api = API.TelegramDesktop
                         client = await tdesk.ToTelethon(session=temp_session, flag=CreateNewSession, api=api)
                         await client.connect()
                         me = await client.get_me()
                         if me:
-                            phone = f"+{me.phone}" if me.phone else "Unknown"
+                            phone = f"+{me.phone}" if me.phone else f"id_{me.id}"
                             phone_clean = phone.replace("+", "")
-                            final_session = os.path.join(manager._sessions_path, f"{phone_clean}.session")
+                            final_session = os.path.join(
+                                manager._sessions_path,
+                                f"{user.id}_{phone_clean}.session",
+                            )
                             await client.disconnect()
-                            shutil.copy2(temp_session, final_session)
+                            existing_account = await db.get_account_by_phone(
+                                user.id, phone
+                            )
+                            await _install_session_file(
+                                temp_session,
+                                final_session,
+                                existing_account.id if existing_account else None,
+                                manager,
+                            )
                             acc_id = await db.add_account(
                                 user_id=user.id,
                                 phone=phone,
-                                api_id=config.API_ID,
-                                api_hash=config.API_HASH,
+                                api_id=config.DEFAULT_API_ID,
+                                api_hash=config.DEFAULT_API_HASH,
                                 name=me.first_name,
-                                session_file=final_session
+                                session_file=final_session,
+                                max_accounts=max_accounts,
                             )
+                            if acc_id is None:
+                                if not existing_account:
+                                    try:
+                                        os.remove(final_session)
+                                    except FileNotFoundError:
+                                        pass
+                                limit_reached = True
+                                break
                             await manager.reconnect(acc_id)
                             added_count += 1
                         else:
@@ -530,31 +634,68 @@ async def mass_add_zip(message: Message, state: FSMContext, db: Database, manage
                             await client.disconnect()
                     except Exception:
                         error_count += 1
+                        if (
+                            existing_account
+                            and not manager.is_connected(existing_account.id)
+                        ):
+                            await manager.reconnect(existing_account.id)
+                    finally:
+                        if client and client.is_connected():
+                            await client.disconnect()
                 dirs.remove("tdata")
                 
             for file in files:
-                if file.endswith(".session"):
+                if available_slots is not None and added_count >= available_slots:
+                    limit_reached = True
+                    break
+                if file.lower().endswith(".session"):
                     session_path = os.path.join(root, file)
+                    client = None
+                    existing_account = None
                     try:
-                        client = TelegramClient(session_path, config.API_ID, config.API_HASH)
+                        client = TelegramClient(
+                            session_path,
+                            config.DEFAULT_API_ID,
+                            config.DEFAULT_API_HASH,
+                        )
                         await client.connect()
                         me = await client.get_me()
                         if me:
-                            phone = f"+{me.phone}" if me.phone else "Unknown"
+                            phone = f"+{me.phone}" if me.phone else f"id_{me.id}"
                             phone_clean = phone.replace("+", "")
-                            final_session = os.path.join(manager._sessions_path, f"{phone_clean}.session")
+                            final_session = os.path.join(
+                                manager._sessions_path,
+                                f"{user.id}_{phone_clean}.session",
+                            )
                             
                             await client.disconnect()
-                            shutil.copy2(session_path, final_session)
+                            existing_account = await db.get_account_by_phone(
+                                user.id, phone
+                            )
+                            await _install_session_file(
+                                session_path,
+                                final_session,
+                                existing_account.id if existing_account else None,
+                                manager,
+                            )
                             
                             acc_id = await db.add_account(
                                 user_id=user.id, 
                                 phone=phone, 
-                                api_id=config.API_ID, 
-                                api_hash=config.API_HASH, 
+                                api_id=config.DEFAULT_API_ID,
+                                api_hash=config.DEFAULT_API_HASH,
                                 name=me.first_name, 
-                                session_file=final_session
+                                session_file=final_session,
+                                max_accounts=max_accounts,
                             )
+                            if acc_id is None:
+                                if not existing_account:
+                                    try:
+                                        os.remove(final_session)
+                                    except FileNotFoundError:
+                                        pass
+                                limit_reached = True
+                                break
                             await manager.reconnect(acc_id)
                             added_count += 1
                         else:
@@ -562,12 +703,24 @@ async def mass_add_zip(message: Message, state: FSMContext, db: Database, manage
                             await client.disconnect()
                     except Exception as e:
                         error_count += 1
+                        if (
+                            existing_account
+                            and not manager.is_connected(existing_account.id)
+                        ):
+                            await manager.reconnect(existing_account.id)
+                    finally:
+                        if client and client.is_connected():
+                            await client.disconnect()
                             
         await state.clear()
         await status_msg.edit_text(
             f"✅ <b>Массовая загрузка завершена</b>\n\n"
             f"Успешно добавлено: <b>{added_count}</b>\n"
-            f"Ошибок: <b>{error_count}</b>",
+            f"Ошибок: <b>{error_count}</b>"
+            + (
+                "\n⚠️ Остальные аккаунты пропущены из-за лимита тарифа."
+                if limit_reached else ""
+            ),
             parse_mode="HTML"
         )
 

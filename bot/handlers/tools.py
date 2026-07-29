@@ -1,4 +1,6 @@
+import html
 import logging
+import os
 from ..utils.emoji import e
 from aiogram import Router, F
 from aiogram.filters import StateFilter, Command
@@ -13,7 +15,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..keyboards.inline import _btn
 from ..services.subscription import SubscriptionService
 import re
-import asyncio
 
 logger = logging.getLogger("dmsender.tools")
 
@@ -97,7 +98,7 @@ async def cb_tools_autoresponder(callback: CallbackQuery, state: FSMContext, db:
         f"━━━━━━━━━━━━━━━━━━\n"
         f"{e('🔄')} <b>Статус:</b> {status}\n\n"
         f"{e('📝')} <b>Текущий текст:</b>\n"
-        f"<i>{current_text or 'Не задан'}</i>\n\n"
+        f"<i>{html.escape(current_text) if current_text else 'Не задан'}</i>\n\n"
         f"{e('👇')} Отправьте в чат <b>новый текст</b> для автоответчика."
     )
     
@@ -161,7 +162,7 @@ async def cb_tools_checker(callback: CallbackQuery, state: FSMContext, db: Datab
         )
         return
 
-    accounts = await db.get_all_active_accounts()
+    accounts = await db.get_active_accounts(u_id)
     if not accounts:
         await callback.message.edit_text(f"{e('❌')} Нет подключённых аккаунтов.", reply_markup=tools_menu_kb())
         return
@@ -180,7 +181,7 @@ async def cb_tools_checker(callback: CallbackQuery, state: FSMContext, db: Datab
 
 @router.message(F.document, StateFilter(PhoneCheckerStates.waiting_file))
 async def fsm_checker_file(message: Message, state: FSMContext, db: Database, manager: UserbotManager) -> None:
-    if not message.document.file_name.endswith('.txt'):
+    if not (message.document.file_name or "").lower().endswith('.txt'):
         from ..keyboards.inline import cancel_kb
         await message.answer(f"{e('❌')} Пожалуйста, отправьте именно .txt файл.", reply_markup=cancel_kb("tools:parser"))
         return
@@ -211,8 +212,10 @@ async def fsm_checker_file(message: Message, state: FSMContext, db: Database, ma
         await message.answer(f"{e('❌')} Ошибка при чтении файла.", reply_markup=cancel_kb("tools:parser"))
         return
     finally:
-        try: os.remove(path)
-        except: pass
+        try:
+            os.remove(path)
+        except OSError:
+            pass
         
     if not phones_list:
         from ..keyboards.inline import cancel_kb
@@ -225,8 +228,12 @@ async def fsm_checker_file(message: Message, state: FSMContext, db: Database, ma
     status_msg = await message.answer(f"⏳ Подготовка к проверке базы ({len(phones_list)} номеров)...")
     await state.clear()
     
-    import asyncio
-    asyncio.create_task(manager.check_phones(account_id, phones_list, status_msg, message.from_user.id))
+    manager.start_background(
+        manager.check_phones(
+            account_id, phones_list, status_msg, message.from_user.id
+        ),
+        f"phone_checker_{message.from_user.id}",
+    )
 
 @router.message(StateFilter(ToolsStates.autoresponder_text))
 async def fsm_autoresponder_text(message: Message, state: FSMContext, db: Database) -> None:
@@ -402,8 +409,18 @@ async def fsm_parser_groups(message: Message, state: FSMContext, db: Database, m
     await state.clear()
     
     # We will pass the status_msg object to manager to update it directly
-    campaign_id = data.get("campaign_id")
-    asyncio.create_task(manager.advanced_parse_groups(account_id, groups, mode, status_msg, message.from_user.id, campaign_id=campaign_id))
+    campaign_id = data.get("target_campaign_id")
+    manager.start_background(
+        manager.advanced_parse_groups(
+            account_id,
+            groups,
+            mode,
+            status_msg,
+            message.from_user.id,
+            campaign_id=campaign_id,
+        ),
+        f"group_parser_{message.from_user.id}",
+    )
 
 @router.message(F.document, StateFilter(AdvancedParserStates.waiting_file))
 async def fsm_parser_file(message: Message, state: FSMContext, db: Database, manager: UserbotManager) -> None:
@@ -421,7 +438,7 @@ async def fsm_parser_file(message: Message, state: FSMContext, db: Database, man
         await message.answer(f"{e('❌')} <b>Доступ ограничен!</b>", reply_markup=b.as_markup(), parse_mode="HTML")
         return
         
-    if not message.document.file_name.endswith('.txt'):
+    if not (message.document.file_name or "").lower().endswith('.txt'):
         await message.answer(f"{e('❌')} Пожалуйста, отправьте именно .txt файл.", reply_markup=cancel_kb(f"tools:parser:camp:{data.get('target_campaign_id')}" if data.get("target_campaign_id") else "tools:parser"))
         return
         
@@ -450,8 +467,10 @@ async def fsm_parser_file(message: Message, state: FSMContext, db: Database, man
         await message.answer(f"{e('❌')} Ошибка при чтении файла.", reply_markup=cancel_kb(f"tools:parser:camp:{data.get('target_campaign_id')}" if data.get("target_campaign_id") else "tools:parser"))
         return
     finally:
-        try: os.remove(path)
-        except: pass
+        try:
+            os.remove(path)
+        except OSError:
+            pass
         
     if not users_list:
         await message.answer(f"{e('❌')} Файл пуст.", reply_markup=cancel_kb(f"tools:parser:camp:{data.get('target_campaign_id')}" if data.get("target_campaign_id") else "tools:parser"))
@@ -464,13 +483,22 @@ async def fsm_parser_file(message: Message, state: FSMContext, db: Database, man
     status_msg = await message.answer(f"⏳ Подготовка к парсингу базы ({len(users_list)} строк)...")
     await state.clear()
     
-    asyncio.create_task(manager.advanced_parse_users_list(account_id, users_list, mode, status_msg, message.from_user.id))
+    manager.start_background(
+        manager.advanced_parse_users_list(
+            account_id,
+            users_list,
+            mode,
+            status_msg,
+            message.from_user.id,
+        ),
+        f"user_parser_{message.from_user.id}",
+    )
 
 @router.callback_query(F.data.startswith("parser:download:"), StateFilter("*"))
 async def cb_parser_download(callback: CallbackQuery, manager: UserbotManager) -> None:
     job_id = callback.data.split(":")[2]
     # We will fetch the partial results from the manager
-    file_path = manager.get_parser_partial_result(job_id)
+    file_path = manager.get_parser_partial_result(job_id, callback.from_user.id)
     if not file_path:
         await callback.answer("Результаты еще не готовы или процесс уже завершен.", show_alert=True)
         return
@@ -482,6 +510,11 @@ async def cb_parser_download(callback: CallbackQuery, manager: UserbotManager) -
     except Exception as exc:
         logger.error(f"Failed to send partial file: {exc}")
         await callback.answer("Ошибка при отправке файла.", show_alert=True)
+    finally:
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
 
 
 @router.callback_query(F.data.startswith("tools:parser:camp:"), StateFilter("*"))

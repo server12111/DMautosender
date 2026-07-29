@@ -39,28 +39,40 @@ async def create_payment_link(
         return None
 
     payload = {
-        "order_id": order_id,
-        "amount": amount,
-        "currency": currency,
+        "paymentDetails": {
+            "amount": amount,
+            "currency": currency,
+        },
         "description": description,
+        "payload": order_id,
     }
     if success_url:
-        payload["success_url"] = success_url
+        payload["return"] = success_url
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{BASE_URL}/api/payment",
+                f"{BASE_URL}/v2/transaction/process",
                 json=payload,
                 headers=_headers(),
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 data = await resp.json()
                 logger.debug("Platega create_payment response: %s", data)
-                if resp.status in (200, 201) and data.get("payment_url"):
+                payment_url = (
+                    data.get("url")
+                    or data.get("redirect")
+                    or data.get("payment_url")
+                )
+                payment_id = (
+                    data.get("transactionId")
+                    or data.get("payment_id")
+                    or data.get("id")
+                )
+                if resp.status in (200, 201) and payment_url and payment_id:
                     return {
-                        "payment_url": data["payment_url"],
-                        "payment_id": data.get("payment_id") or data.get("id", ""),
+                        "payment_url": payment_url,
+                        "payment_id": payment_id,
                     }
                 logger.error("Platega error: %s %s", resp.status, data)
                 return None
@@ -78,12 +90,25 @@ async def check_payment_status(payment_id: str) -> Optional[str]:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
-                f"{BASE_URL}/api/payment/{payment_id}/status",
+                f"{BASE_URL}/transaction/{payment_id}",
                 headers=_headers(),
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 data = await resp.json()
-                return data.get("status")
+                status = str(data.get("status", "")).upper()
+                if status == "CONFIRMED":
+                    return "paid"
+                if status == "PENDING":
+                    return "pending"
+                if status in {
+                    "CANCELED",
+                    "CANCELLED",
+                    "EXPIRED",
+                    "FAILED",
+                    "CHARGEBACKED",
+                }:
+                    return "failed"
+                return None
     except Exception as e:
         logger.error("Platega check_status exception: %s", e)
         return None

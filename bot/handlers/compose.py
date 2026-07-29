@@ -1,3 +1,4 @@
+import html
 import logging
 from ..utils.emoji import e
 from aiogram import Router, F
@@ -39,13 +40,18 @@ class ComposeStates(StatesGroup):
 def _compose_menu_text(campaign: Campaign) -> str:
     text = campaign.text or ""
     image = e("✅") if campaign.image_file_id else e("❌")
-    attach = campaign.attach_file_name or (e("✅") if campaign.attach_file_id else e("❌"))
+    attach = (
+        html.escape(campaign.attach_file_name)
+        if campaign.attach_file_name
+        else (e("✅") if campaign.attach_file_id else e("❌"))
+    )
 
-    preview = (text[:200] + "...") if len(text) > 200 else text
+    preview_text = (text[:200] + "...") if len(text) > 200 else text
+    preview = html.escape(preview_text)
     return (
         f"{e('📝')} <b>НАСТРОЙКА СООБЩЕНИЯ</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"{e('📢')} Рассылка: <b>{campaign.name}</b>\n\n"
+        f"{e('📢')} Рассылка: <b>{html.escape(campaign.name)}</b>\n\n"
         f"{e('🖼')} <b>Изображение/Видео:</b> {image}\n"
         f"{e('📎')} <b>Файл:</b> {attach}\n\n"
         f"{e('📝')} <b>Текущий текст:</b>\n"
@@ -139,7 +145,7 @@ async def fsm_receive_image(message: Message, state: FSMContext, db: Database) -
     campaign = await db.get_campaign(campaign_id)
     await message.answer(
         "✅ Изображение сохранено!\n\n" + _compose_menu_text(campaign),
-        reply_markup=compose_menu_kb(campaign_id=campaign_id, has_image=True, has_file=False),
+        reply_markup=compose_menu_kb(campaign_id=campaign_id, has_image=True, has_file=bool(campaign.attach_file_id)),
         parse_mode="HTML",
     )
 
@@ -186,8 +192,9 @@ async def fsm_receive_file(message: Message, state: FSMContext, db: Database) ->
 
     campaign = await db.get_campaign(campaign_id)
     await message.answer(
-        f"✅ Файл «{doc.file_name}» сохранён!\n\n" + _compose_menu_text(campaign),
-        reply_markup=compose_menu_kb(campaign_id=campaign_id, has_image=False, has_file=True),
+        f"✅ Файл «{html.escape(doc.file_name or 'file')}» сохранён!\n\n"
+        + _compose_menu_text(campaign),
+        reply_markup=compose_menu_kb(campaign_id=campaign_id, has_image=bool(campaign.image_file_id), has_file=True),
         parse_mode="HTML",
     )
 

@@ -1,3 +1,4 @@
+import html
 import time
 from aiogram.filters import StateFilter
 from aiogram import Router, F
@@ -10,10 +11,18 @@ from ..database.models import BotUser
 router = Router()
 
 def _format_stats(db_stats: dict, sender_stats=None, campaign_name: str = "") -> str:
+    sent = db_stats.get("sent")
+    if sent is None:
+        sent = max(
+            0,
+            db_stats.get("processed", 0)
+            - db_stats.get("blocked", 0)
+            - db_stats.get("errors", 0),
+        )
     lines = [
-        f"📊 <b>Статистика рассылки:</b> {campaign_name}\n",
+        f"📊 <b>Статистика рассылки:</b> {html.escape(campaign_name)}\n",
         f"├ Всего в базе:   <b>{db_stats.get('total', 0)}</b>",
-        f"├ Отправлено:     <b>{db_stats.get('sent', 0)}</b>",
+        f"├ Отправлено:     <b>{sent}</b>",
         f"├ Ошибок:         <b>{db_stats.get('errors', 0)}</b>",
         f"├ Заблокировано:  <b>{db_stats.get('blocked', 0)}</b>",
         f"└ Осталось:       <b>{db_stats.get('remaining', 0)}</b>",

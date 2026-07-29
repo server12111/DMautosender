@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import random
 import time
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from telethon.errors import (
     UsernameNotOccupiedError,
     UsernameInvalidError,
     PhoneNumberBannedError,
+    PeerIdInvalidError,
 )
 
 from ..database.db import Database
@@ -26,6 +28,10 @@ from ..utils.spintax import evaluate_spintax
 from ..userbot.manager import UserbotManager
 
 logger = logging.getLogger("dmsender.sender")
+
+
+class _NoPeerAccessError(Exception):
+    """Числовой ID без access_hash в кэше сессии — отправка невозможна."""
 
 
 @dataclass
@@ -43,8 +49,12 @@ class SendConfig:
 
     def compute_delay(self) -> float:
         if self.delay_mode == "random":
-            return random.uniform(self.delay_min, self.delay_max)
-        return self.delay_fixed
+            delay = random.uniform(self.delay_min, self.delay_max)
+        else:
+            delay = self.delay_fixed
+        if not math.isfinite(delay) or delay < 0:
+            raise ValueError("Некорректная задержка рассылки")
+        return delay
 
 
 @dataclass
@@ -101,6 +111,8 @@ class MailingSender:
         self._on_log: Optional[OnLog] = None
         self._on_finished: Optional[OnFinished] = None
         self._on_spamblock: Optional[OnSpamBlock] = None
+        self._file_cache: dict[str, bytes] = {}
+        self._file_download_lock = asyncio.Lock()
 
     @property
     def is_running(self) -> bool:
@@ -147,6 +159,16 @@ class MailingSender:
     def stop(self) -> None:
         self._stop_event.set()
 
+    async def _sleep_or_stop(self, seconds: float) -> None:
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError("Некорректная задержка рассылки")
+        if seconds <= 0 or self._stop_event.is_set():
+            return
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            pass
+
     async def start(self) -> None:
         if self._is_running:
             return
@@ -159,6 +181,16 @@ class MailingSender:
             cycle = 0
             while not self._stop_event.is_set():
                 cycle += 1
+                while not self._queue.empty():
+                    try:
+                        self._queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                # A previous process may have been killed after claiming a
+                # target. Those claims must not make the target invisible on
+                # the next launch.
+                if cycle == 1:
+                    await self._db.reset_pending_claims(self._campaign_id)
 
                 unprocessed = await self._db.get_unprocessed_identifiers(self._campaign_id)
                 if not unprocessed:
@@ -184,7 +216,16 @@ class MailingSender:
                     asyncio.create_task(self._worker(acc_id), name=f"worker_{acc_id}_c{cycle}")
                     for acc_id in account_ids
                 ]
-                await asyncio.gather(*tasks, return_exceptions=True)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, BaseException):
+                        logger.error(
+                            "Mailing worker failed",
+                            exc_info=(type(result), result, result.__traceback__),
+                        )
+                # No worker is active now, so every remaining pending row is a
+                # claim abandoned by a failed/cancelled worker.
+                await self._db.reset_pending_claims(self._campaign_id)
 
                 if self._stop_event.is_set():
                     break
@@ -198,11 +239,7 @@ class MailingSender:
                     f"⏸ Пауза между циклами: {self._config.pause_between_cycles}с "
                     f"(осталось {len(remaining)} пользователей)..."
                 )
-                # Спим кусками по 1с чтобы stop() срабатывал быстро
-                for _ in range(int(self._config.pause_between_cycles)):
-                    if self._stop_event.is_set():
-                        break
-                    await asyncio.sleep(1)
+                await self._sleep_or_stop(self._config.pause_between_cycles)
 
         finally:
             self._is_running = False
@@ -220,7 +257,10 @@ class MailingSender:
                 try:
                     await self._on_finished()
                 except Exception:
-                    pass
+                    logger.exception(
+                        "Mailing completion callback failed for campaign %s",
+                        self._campaign_id,
+                    )
 
     async def _worker(self, account_id: int) -> None:
         client = self._manager.get_client(account_id)
@@ -254,7 +294,7 @@ class MailingSender:
                 await self._log(
                     f"⏳ [{acc_label}] FloodWait {e.seconds}с — ожидаем..."
                 )
-                await asyncio.sleep(e.seconds)
+                await self._sleep_or_stop(e.seconds)
                 continue
 
             except PeerFloodError:
@@ -279,6 +319,11 @@ class MailingSender:
                 self._stats.blocked += 1
                 await self._log(f"👻 [{acc_label}] → {identifier}: аккаунт удалён")
 
+            except (_NoPeerAccessError, PeerIdInvalidError):
+                await self._db.mark_sent(self._campaign_id, identifier, account_id, "blocked", "invalid_peer")
+                self._stats.blocked += 1
+                await self._log(f"🔒 [{acc_label}] → {identifier}: недоступен (нет access_hash)")
+
             except (UsernameNotOccupiedError, UsernameInvalidError):
                 await self._db.mark_sent(self._campaign_id, identifier, account_id, "error", "invalid_username")
                 self._stats.errors += 1
@@ -295,38 +340,29 @@ class MailingSender:
                 break
 
             except Exception as e:
-                err_msg = str(e)[:200]
-                await self._db.mark_sent(self._campaign_id, identifier, account_id, "error", err_msg)
-                self._stats.errors += 1
-                await self._log(f"❌ [{acc_label}] → {identifier}: {err_msg}")
+                err_str = str(e)
+                # Fallback: некоторые версии Telethon не попадают в except выше
+                if "PEER_ID_INVALID" in err_str or "An invalid Peer" in err_str or "invalid_peer" in err_str.lower():
+                    await self._db.mark_sent(self._campaign_id, identifier, account_id, "blocked", "invalid_peer")
+                    self._stats.blocked += 1
+                    await self._log(f"🔒 [{acc_label}] → {identifier}: недоступен (нет access_hash)")
+                else:
+                    err_msg = err_str[:200]
+                    await self._db.mark_sent(self._campaign_id, identifier, account_id, "error", err_msg)
+                    self._stats.errors += 1
+                    await self._log(f"❌ [{acc_label}] → {identifier}: {err_msg}")
 
             remaining = self._queue.qsize()
             await self._notify_progress(remaining)
             if not self._stop_event.is_set():
-                await asyncio.sleep(self._config.compute_delay())
+                await self._sleep_or_stop(self._config.compute_delay())
 
     async def _resolve_numeric_id(self, client: TelegramClient, user_id: int):
-        """Три попытки получить entity по числовому ID."""
-        from telethon.tl.functions.users import GetUsersRequest
-        from telethon.tl.types import InputUser, InputPeerUser, UserEmpty
-
-        # 1. Кэш сессии — работает если аккаунт уже взаимодействовал с юзером
+        """Получить entity по числовому ID из кэша сессии."""
         try:
             return await client.get_entity(user_id)
-        except Exception:
-            pass
-
-        # 2. GetUsersRequest с access_hash=0 — работает для публичных аккаунтов
-        try:
-            result = await client(GetUsersRequest([InputUser(user_id, 0)]))
-            if result and not isinstance(result[0], UserEmpty) and getattr(result[0], "id", None):
-                return result[0]
-        except Exception:
-            pass
-
-        # 3. Прямой InputPeerUser(id, 0) — обходит Telethon-резолюцию,
-        #    запрос уходит на сервер напрямую, сервер решает по настройкам приватности
-        return InputPeerUser(user_id, 0)
+        except ValueError:
+            raise _NoPeerAccessError(user_id)
 
     async def _send_to_user(
         self, client: TelegramClient, identifier: str, config: SendConfig
@@ -365,8 +401,16 @@ class MailingSender:
             )
 
     async def _download_file(self, file_id: str, filename: str = "file") -> BytesIO:
-        result = await self._bot.download(file_id)
-        result.seek(0)
+        file_data = self._file_cache.get(file_id)
+        if file_data is None:
+            async with self._file_download_lock:
+                file_data = self._file_cache.get(file_id)
+                if file_data is None:
+                    result = await self._bot.download(file_id)
+                    result.seek(0)
+                    file_data = result.read()
+                    self._file_cache[file_id] = file_data
+        stream = BytesIO(file_data)
         # Telethon определяет тип по атрибуту name у BytesIO
-        result.name = filename
-        return result
+        stream.name = filename
+        return stream

@@ -4,6 +4,7 @@ Shows plans, handles Platega / CryptoBot / TON payment flows.
 """
 import asyncio
 import logging
+import math
 from aiogram.filters import StateFilter
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
@@ -23,11 +24,27 @@ logger = logging.getLogger("dmsender.subscription")
 router = Router()
 
 PLAN_DURATION_DAYS = 30  # All plans are monthly
+PAID_PLANS = {"pro", "business"}
+
+
+async def _positive_setting(db: Database, key: str, default: float) -> float:
+    """Return a valid positive numeric setting, falling back from legacy junk."""
+    raw_value = await db.get_bot_setting(key, str(default))
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value) or value <= 0:
+        logger.error("Invalid numeric bot setting %s=%r; using %s", key, raw_value, default)
+        return float(default)
+    return value
 
 
 async def _plans_text(db: Database) -> str:
-    pro_price = await db.get_bot_setting("pro_price", str(config.DEFAULT_PRO_PRICE_USD))
-    biz_price = await db.get_bot_setting("business_price", str(config.DEFAULT_BUSINESS_PRICE_USD))
+    pro_price = await _positive_setting(db, "pro_price", config.DEFAULT_PRO_PRICE_USD)
+    biz_price = await _positive_setting(
+        db, "business_price", config.DEFAULT_BUSINESS_PRICE_USD
+    )
     return (
         f"{e('👑')} <b>ТАРИФНЫЕ ПЛАНЫ</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
@@ -59,8 +76,10 @@ async def cb_support_contact(callback: CallbackQuery, db: Database) -> None:
 
 @router.callback_query(F.data == "sub:plans", StateFilter("*"))
 async def cb_plans(callback: CallbackQuery, db: Database) -> None:
-    pro_price = await db.get_bot_setting("pro_price", str(config.DEFAULT_PRO_PRICE_USD))
-    biz_price = await db.get_bot_setting("business_price", str(config.DEFAULT_BUSINESS_PRICE_USD))
+    pro_price = await _positive_setting(db, "pro_price", config.DEFAULT_PRO_PRICE_USD)
+    biz_price = await _positive_setting(
+        db, "business_price", config.DEFAULT_BUSINESS_PRICE_USD
+    )
     text = await _plans_text(db)
     try:
         await callback.message.edit_text(
@@ -99,13 +118,20 @@ async def cb_select_plan(callback: CallbackQuery, db: Database) -> None:
 @router.callback_query(F.data.startswith("pay:platega:"), StateFilter("*"))
 async def cb_pay_platega(callback: CallbackQuery, db: Database) -> None:
     plan = callback.data.split(":")[2]
+    if plan not in PAID_PLANS:
+        return await callback.answer("Неизвестный тариф.", show_alert=True)
     user = await db.get_user_by_tg_id(callback.from_user.id)
     if not user:
         await callback.answer("Ошибка.", show_alert=True)
         return
 
     price_key = "pro_price" if plan == "pro" else "business_price"
-    amount = float(await db.get_bot_setting(price_key, str(config.DEFAULT_PRO_PRICE_USD)))
+    default_price = (
+        config.DEFAULT_PRO_PRICE_USD
+        if plan == "pro"
+        else config.DEFAULT_BUSINESS_PRICE_USD
+    )
+    amount = await _positive_setting(db, price_key, default_price)
 
     payment = await db.create_payment(user.id, "platega", plan, amount, "USD")
     order_id = f"dm_{user.id}_{payment.id}"
@@ -151,13 +177,20 @@ async def cb_pay_platega(callback: CallbackQuery, db: Database) -> None:
 @router.callback_query(F.data.startswith("pay:cryptobot:"), StateFilter("*"))
 async def cb_pay_cryptobot(callback: CallbackQuery, db: Database) -> None:
     plan = callback.data.split(":")[2]
+    if plan not in PAID_PLANS:
+        return await callback.answer("Неизвестный тариф.", show_alert=True)
     user = await db.get_user_by_tg_id(callback.from_user.id)
     if not user:
         await callback.answer("Ошибка.", show_alert=True)
         return
 
     price_key = "pro_price" if plan == "pro" else "business_price"
-    amount = float(await db.get_bot_setting(price_key, str(config.DEFAULT_PRO_PRICE_USD)))
+    default_price = (
+        config.DEFAULT_PRO_PRICE_USD
+        if plan == "pro"
+        else config.DEFAULT_BUSINESS_PRICE_USD
+    )
+    amount = await _positive_setting(db, price_key, default_price)
 
     payment = await db.create_payment(user.id, "cryptobot", plan, amount, "USDT")
 
@@ -202,6 +235,8 @@ async def cb_pay_cryptobot(callback: CallbackQuery, db: Database) -> None:
 @router.callback_query(F.data.startswith("pay:ton:"), StateFilter("*"))
 async def cb_pay_ton(callback: CallbackQuery, db: Database) -> None:
     plan = callback.data.split(":")[2]
+    if plan not in PAID_PLANS:
+        return await callback.answer("Неизвестный тариф.", show_alert=True)
     user = await db.get_user_by_tg_id(callback.from_user.id)
     if not user:
         await callback.answer("Ошибка.", show_alert=True)
@@ -212,10 +247,21 @@ async def cb_pay_ton(callback: CallbackQuery, db: Database) -> None:
         return
 
     price_key = "pro_price" if plan == "pro" else "business_price"
-    amount_usd = float(await db.get_bot_setting(price_key, str(config.DEFAULT_PRO_PRICE_USD)))
+    default_price = (
+        config.DEFAULT_PRO_PRICE_USD
+        if plan == "pro"
+        else config.DEFAULT_BUSINESS_PRICE_USD
+    )
+    amount_usd = await _positive_setting(db, price_key, default_price)
     # Approximate TON price (can be fetched from TonCenter, here using fixed)
-    ton_rate = float(await db.get_bot_setting("ton_rate_usd", "3.0"))
-    amount_ton = round(amount_usd / ton_rate, 2)
+    ton_rate = await _positive_setting(db, "ton_rate_usd", 3.0)
+    amount_ton = round(amount_usd / ton_rate, 4)
+    if amount_ton <= 0:
+        await callback.answer(
+            "Некорректный курс TON. Обратитесь в поддержку.",
+            show_alert=True,
+        )
+        return
 
     payment = await db.create_payment(user.id, "ton", plan, amount_ton, "TON")
     info = payment_toncenter.get_payment_info(user.id, payment.id, amount_ton)
@@ -255,40 +301,63 @@ async def cb_check_payment(callback: CallbackQuery, db: Database, bot: Bot) -> N
         await callback.answer("Ошибка доступа.", show_alert=True)
         return
 
-    await callback.answer("🔄 Проверяем статус...")
+    if provider != payment.provider:
+        await callback.answer("Ошибка платёжного провайдера.", show_alert=True)
+        return
+    if payment.plan not in PAID_PLANS:
+        await callback.answer("Некорректный тариф платежа.", show_alert=True)
+        return
+    if not math.isfinite(payment.amount) or payment.amount <= 0:
+        await callback.answer("Некорректная сумма платежа.", show_alert=True)
+        return
 
-    paid = False
+    paid = payment.status == "paid"
+    if not paid:
+        await callback.answer("🔄 Проверяем статус...")
+    else:
+        await callback.answer("✅ Платёж уже подтверждён.")
 
-    if provider == "platega" and payment.external_id:
+    if not paid and provider == "platega" and payment.external_id:
         status = await payment_platega.check_payment_status(payment.external_id)
         paid = (status == "paid")
 
-    elif provider == "cryptobot" and payment.external_id:
+    elif not paid and provider == "cryptobot" and payment.external_id:
         status = await payment_cryptobot.check_invoice_status(int(payment.external_id))
         paid = (status == "paid")
 
-    elif provider == "ton":
+    elif not paid and provider == "ton":
         paid = await payment_toncenter.check_transaction_received(
             user.id, payment_db_id, payment.amount
         )
 
     if paid:
-        await db.update_payment_status(payment_db_id, "paid")
-        # Create subscription
-        sub = await db.create_subscription(
-            user_id=user.id,
-            plan=payment.plan,
-            duration_days=PLAN_DURATION_DAYS,
-            provider=provider,
-            payment_id=str(payment_db_id),
+        reward_base = payment.amount
+        if payment.provider == "ton":
+            price_key = (
+                "pro_price" if payment.plan == "pro" else "business_price"
+            )
+            default_price = (
+                config.DEFAULT_PRO_PRICE_USD
+                if payment.plan == "pro"
+                else config.DEFAULT_BUSINESS_PRICE_USD
+            )
+            reward_base = await _positive_setting(db, price_key, default_price)
+
+        finalized = await db.finalize_payment(
+            payment_db_id,
+            PLAN_DURATION_DAYS,
+            referral_reward=reward_base * 0.10,
         )
+        if not finalized:
+            await callback.answer("Платёж не найден.", show_alert=True)
+            return
+        sub, newly_granted, referrer_id = finalized
         
         # Referral payout (10%)
-        if user.referrer_id:
-            reward = payment.amount * 0.10
-            await db.add_balance(user.referrer_id, reward)
+        if newly_granted and referrer_id:
+            reward = reward_base * 0.10
             try:
-                referrer = await db.get_user_by_id(user.referrer_id)
+                referrer = await db.get_user_by_id(referrer_id)
                 if referrer:
                     await bot.send_message(
                         referrer.tg_id,
@@ -297,7 +366,7 @@ async def cb_check_payment(callback: CallbackQuery, db: Database, bot: Bot) -> N
                         f"Текущий баланс доступен в Профиле.",
                         parse_mode="HTML"
                     )
-            except Exception as e:
+            except Exception:
                 pass
         plan_info = PLAN_LIMITS.get(payment.plan, {})
         label = plan_info.get("label", payment.plan.upper())

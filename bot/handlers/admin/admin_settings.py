@@ -1,5 +1,8 @@
 """Admin settings — support username, plan prices, payment keys."""
+import html
 import logging
+import math
+import re
 from aiogram import Router, F
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -53,7 +56,7 @@ async def _settings_text(db: Database) -> str:
 
     return (
         f"{e('⚙️')} <b>Настройки бота</b>\n\n"
-        f"{e('💬')} Support: @{support}\n"
+        f"{e('💬')} Support: @{html.escape(support)}\n"
         f"{e('💵')} Pro: ${pro_price}/мес\n"
         f"{e('💵')} Business: ${biz_price}/мес\n\n"
         f"<b>Платёжные провайдеры:</b>\n"
@@ -108,14 +111,33 @@ async def fsm_setting_value(message: Message, state: FSMContext, db: Database) -
     # Validate prices
     if setting_key in ("pro_price", "business_price", "ton_rate_usd"):
         try:
-            float(value.replace(",", "."))
+            number = float(value.replace(",", "."))
+            if not math.isfinite(number) or number <= 0:
+                raise ValueError
             value = value.replace(",", ".")
         except ValueError:
             await message.answer("❌ Введите число (например: 9.99):", reply_markup=cancel_kb())
             return
+    elif setting_key == "support_username":
+        value = value.lstrip("@")
+        if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", value):
+            await message.answer(
+                "❌ Введите корректный Telegram username: 5–32 латинских "
+                "букв, цифр или подчёркиваний.",
+                reply_markup=cancel_kb(),
+            )
+            return
 
     db_key = SETTING_DB_KEYS.get(setting_key, setting_key)
     await db.set_bot_setting(db_key, value)
+    config_attr = {
+        "platega_merchant_id": "PLATEGA_MERCHANT_ID",
+        "platega_secret": "PLATEGA_SECRET",
+        "cryptobot_token": "CRYPTOBOT_TOKEN",
+        "ton_wallet": "TON_WALLET",
+    }.get(db_key)
+    if config_attr:
+        setattr(config, config_attr, value)
     await state.clear()
 
     label = SETTING_LABELS.get(setting_key, setting_key)

@@ -1,6 +1,6 @@
 """Admin promo code management — list, create, deactivate."""
 import logging
-import random
+import secrets
 import string
 from aiogram import Router, F
 from aiogram.filters import StateFilter
@@ -27,7 +27,7 @@ class PromoCreateStates(StatesGroup):
 
 def _random_code(length: int = 8) -> str:
     chars = string.ascii_uppercase + string.digits
-    return "".join(random.choices(chars, k=length))
+    return "".join(secrets.choice(chars) for _ in range(length))
 
 
 @router.callback_query(F.data == "admin:promo:list", StateFilter("*"))
@@ -87,8 +87,7 @@ async def cb_promo_view(callback: CallbackQuery, db: Database) -> None:
 @router.callback_query(F.data.startswith("admin:promo:toggle:"), StateFilter("*"))
 async def cb_promo_toggle(callback: CallbackQuery, db: Database) -> None:
     promo_id = int(callback.data.split(":")[3])
-    await db._conn.execute("UPDATE promo_codes SET is_active = NOT is_active WHERE id=?", (promo_id,))
-    await db._conn.commit()
+    await db.toggle_promo(promo_id)
     await callback.answer("🔄 Статус промокода изменен.", show_alert=True)
     callback.data = f"admin:promo:view:{promo_id}"
     await cb_promo_view(callback, db)
@@ -97,9 +96,7 @@ async def cb_promo_toggle(callback: CallbackQuery, db: Database) -> None:
 @router.callback_query(F.data.startswith("admin:promo:delete:"), StateFilter("*"))
 async def cb_promo_delete(callback: CallbackQuery, db: Database) -> None:
     promo_id = int(callback.data.split(":")[3])
-    await db._conn.execute("DELETE FROM promo_activations WHERE promo_id=?", (promo_id,))
-    await db._conn.execute("DELETE FROM promo_codes WHERE id=?", (promo_id,))
-    await db._conn.commit()
+    await db.delete_promo(promo_id)
     await callback.answer("❌ Промокод удален.", show_alert=True)
     callback.data = "admin:promo:list"
     await cb_promo_list(callback, db)

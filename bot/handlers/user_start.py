@@ -2,6 +2,7 @@
 User start handler — entry point for all users.
 Handles /start, welcome screen, legal agreement, main menu.
 """
+import html
 import logging
 from aiogram import Router, F
 from aiogram.filters import CommandStart, StateFilter
@@ -38,7 +39,7 @@ PRIVACY_TEXT = """
 Данные хранятся на защищённых серверах и не передаются третьим лицам, за исключением платёжных провайдеров (Platega, CryptoBot) при проведении оплаты.
 
 <b>4. Telegram-аккаунты</b>
-Сессии Telegram-аккаунтов хранятся в зашифрованном виде. Вы несёте ответственность за соблюдение правил Telegram при использовании рассылки.
+Файлы сессий Telegram-аккаунтов хранятся на сервере бота без дополнительного прикладного шифрования. Доступ к серверу должен быть ограничен владельцем сервиса. Вы несёте ответственность за соблюдение правил Telegram при использовании рассылки.
 
 <b>5. Удаление данных</b>
 Вы можете запросить удаление своих данных через поддержку.
@@ -81,7 +82,7 @@ DMautosender предоставляет инструмент для автома
 
 
 def _welcome_text(user: BotUser) -> str:
-    name = user.full_name or user.username or "пользователь"
+    name = html.escape(user.full_name or user.username or "пользователь")
     return (
         f"{e('👋')} Привет, <b>{name}</b>!\n\n"
         f"{e('🤖')} <b>DMautosender</b> — мощный инструмент для автоматической\n"
@@ -117,6 +118,10 @@ async def cmd_start(message: Message, state: FSMContext, db: Database) -> None:
             referrer_id = int(args[1].split("_")[1])
         except ValueError:
             pass
+    if referrer_id is not None:
+        referrer = await db.get_user_by_id(referrer_id)
+        if not referrer or referrer.tg_id == message.from_user.id:
+            referrer_id = None
 
     user = await db.get_or_create_user(
         message.from_user.id,
@@ -175,7 +180,8 @@ async def cb_agree(callback: CallbackQuery, db: Database) -> None:
     user = await db.get_user_by_tg_id(callback.from_user.id)
     await callback.message.edit_text(
         f"{e('✅')} <b>Соглашение принято!</b>\n\n"
-        f"{e('🎁')} Вам активирован <b>бесплатный пробный период (3 дня Free)</b>.\n\n"
+        f"{e('🎁')} Вам активирован <b>бесплатный пробный период "
+        f"({config.DEFAULT_TRIAL_DAYS} дн. Free)</b>.\n\n"
         f"Для полного доступа оформите подписку через раздел <b>Профиль → Подписка</b>.\n\n"
         + _main_menu_text(user),
         reply_markup=main_menu_kb(is_admin=is_admin),
@@ -220,19 +226,9 @@ async def fallback_handler(message: Message, db: Database) -> None:
 
 @router.callback_query(F.data == "sender:menu", StateFilter("*"))
 async def cb_sender_menu(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
-    await state.clear()
-    from ..services.sender import SenderService
-    from ..keyboards.inline import sender_menu_kb
-    sender_service = callback.bot.get("sender_service")
-    is_running = False
-    if sender_service:
-        is_running = sender_service.is_running(callback.from_user.id)
-    await callback.message.edit_text(
-        "🚀 <b>Управление Рассылкой</b>\n\nЗдесь вы можете загрузить базу, настроить текст, задержки и управлять процессом.",
-        reply_markup=sender_menu_kb(is_running=is_running),
-        parse_mode="HTML"
-    )
-    await callback.answer()
+    # Kept for old inline keyboards created by previous bot versions.
+    # The old SenderService was removed; route stale buttons to the current menu.
+    await cb_main_menu(callback, state, db)
 
 
 @router.callback_query(F.data == "menu:cancel", StateFilter("*"))

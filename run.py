@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import time
 import traceback
@@ -22,3 +23,4 @@ if __name__ == "__main__":
             print(f"\n=== КРАШ ===\n{traceback.format_exc()}")
             print(f"Перезапуск через {RESTART_DELAY} сек...")
             time.sleep(RESTART_DELAY)
+            os.execv(sys.executable, [sys.executable, *sys.argv])

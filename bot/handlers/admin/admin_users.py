@@ -1,4 +1,5 @@
 """Admin user management — list, view, ban/unban, manual subscription grant."""
+import html
 import logging
 from aiogram.filters import StateFilter
 from aiogram import Router, F
@@ -39,9 +40,12 @@ async def cb_admin_users(callback: CallbackQuery, db: Database) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin:user:"), StateFilter("*"))
+@router.callback_query(
+    F.data.regexp(r"^admin:user:(?:view:)?\d+$"),
+    StateFilter("*"),
+)
 async def cb_admin_user_view(callback: CallbackQuery, db: Database) -> None:
-    user_id = int(callback.data.split(":")[2])
+    user_id = int(callback.data.rsplit(":", 1)[1])
     user = await db.get_user_by_id(user_id)
     if not user:
         await callback.answer("Пользователь не найден.", show_alert=True)
@@ -51,13 +55,13 @@ async def cb_admin_user_view(callback: CallbackQuery, db: Database) -> None:
     plan = sub.plan if sub else "free"
     expires = sub.expires_at[:10] if sub and sub.expires_at else "—"
     ban_status = f"{e('⛔')} ЗАБЛОКИРОВАН" if user.is_banned else f"{e('🟢')} активен"
-    uname = f"@{user.username}" if user.username else "нет"
+    uname = html.escape(f"@{user.username}" if user.username else "нет")
 
     text = (
         f"{e('👤')} <b>Пользователь #{user_id}</b>\n\n"
         f"{e('🆔')} Telegram ID: <code>{user.tg_id}</code>\n"
         f"Username: {uname}\n"
-        f"Имя: {user.full_name or '—'}\n"
+        f"Имя: {html.escape(user.full_name or '—')}\n"
         f"Регистрация: {user.created_at[:10] if user.created_at else '—'}\n"
         f"Статус: {ban_status}\n\n"
         f"{e('💳')} Подписка: <b>{plan.upper()}</b>\n"

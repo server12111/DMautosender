@@ -1,5 +1,6 @@
 """Admin broadcast — send message to all bot users."""
 import asyncio
+import html
 import logging
 from aiogram import Router, F, Bot
 from aiogram.filters import StateFilter
@@ -37,8 +38,15 @@ async def cb_broadcast_start(callback: CallbackQuery, state: FSMContext) -> None
 @router.message(StateFilter(BroadcastStates.waiting_message))
 async def fsm_broadcast_message(message: Message, state: FSMContext) -> None:
     # Store the message content for confirmation
+    formatted_text = message.html_text
+    if not formatted_text and not message.photo and not message.document:
+        await message.answer(
+            "❌ Отправьте текст, фото или документ.",
+            reply_markup=cancel_kb(),
+        )
+        return
     msg_data = {
-        "text": message.text or message.caption or "",
+        "text": formatted_text,
         "photo_id": message.photo[-1].file_id if message.photo else None,
         "document_id": message.document.file_id if message.document else None,
         "doc_name": message.document.file_name if message.document else None,
@@ -46,12 +54,16 @@ async def fsm_broadcast_message(message: Message, state: FSMContext) -> None:
     await state.update_data(msg_data=msg_data)
     await state.set_state(BroadcastStates.confirm)
 
-    preview = (msg_data["text"][:200] + "...") if len(msg_data["text"]) > 200 else msg_data["text"]
+    raw_preview = (
+        (message.text or message.caption or "")[:200]
+        + ("..." if len(message.text or message.caption or "") > 200 else "")
+    )
+    preview = html.escape(raw_preview)
     media_str = ""
     if msg_data["photo_id"]:
         media_str = "\n📷 [фото прикреплено]"
     elif msg_data["document_id"]:
-        media_str = f"\n📎 [{msg_data['doc_name']}]"
+        media_str = f"\n📎 [{html.escape(msg_data['doc_name'] or 'file')}]"
 
     await message.answer(
         f"{e('📢')} <b>Подтвердите рассылку</b>\n\n"

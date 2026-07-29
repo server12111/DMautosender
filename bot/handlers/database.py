@@ -1,3 +1,4 @@
+import html
 import logging
 from ..utils.emoji import e
 from aiogram import Router, F, Bot
@@ -20,13 +21,19 @@ class LoadDatabaseStates(StatesGroup):
     waiting_file = State()
 
 def _format_db_text(campaign: Campaign, stats: dict) -> str:
+    sent = max(
+        0,
+        stats.get("processed", 0)
+        - stats.get("blocked", 0)
+        - stats.get("errors", 0),
+    )
     return (
         f"{e('📁')} <b>БАЗА ПОЛУЧАТЕЛЕЙ</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"{e('📢')} Рассылка: <b>{campaign.name}</b>\n\n"
+        f"{e('📢')} Рассылка: <b>{html.escape(campaign.name)}</b>\n\n"
         f"{e('📊')} <b>Статистика:</b>\n"
         f" ├ Всего загружено: <b>{stats['total']}</b>\n"
-        f" ├ Успешно отправлено: <b>{stats['processed']}</b>\n"
+        f" ├ Успешно отправлено: <b>{sent}</b>\n"
         f" ├ В очереди: <b>{stats['remaining']}</b>\n"
         f" ├ Заблокировано: <b>{stats['blocked']}</b>\n"
         f" └ Ошибок: <b>{stats['errors']}</b>\n\n"
@@ -95,7 +102,10 @@ async def fsm_receive_file(
         buf.seek(0)
         content = buf.read()
     except Exception as e:
-        await status_msg.edit_text(f"❌ Не удалось скачать файл: {e}", reply_markup=back_to_menu_kb())
+        await status_msg.edit_text(
+            f"❌ Не удалось скачать файл: {html.escape(str(e))}",
+            reply_markup=back_to_menu_kb(),
+        )
         await state.clear()
         return
 
@@ -127,15 +137,26 @@ async def fsm_receive_file(
             await state.clear()
             return
         
-        identifiers = identifiers[:allowed_to_add]
-        warning = f"\n⚠️ Загружено только {allowed_to_add} строк из-за ограничений вашего тарифа."
+        warning = (
+            f"\n⚠️ Будет добавлено не более {allowed_to_add} новых строк "
+            "из-за ограничений вашего тарифа."
+        )
     else:
         warning = ""
 
     await status_msg.edit_text(f"⏳ Добавляем в базу {len(identifiers)}...")
 
     source_name = doc.file_name or "uploaded.txt"
-    added, skipped = await db.add_targets_bulk(campaign_id, identifiers, source_name)
+    requested_count = len(identifiers)
+    added, skipped = await db.add_targets_bulk(
+        campaign_id,
+        identifiers,
+        source_name,
+        max_targets=max_targets,
+    )
+    db_limit_reached = added + skipped < requested_count
+    if db_limit_reached and not warning:
+        warning = "\n⚠️ Остальные строки пропущены из-за лимита тарифа."
     await state.clear()
 
     campaign = await db.get_campaign(campaign_id)
@@ -171,7 +192,7 @@ async def cb_db_clear_all_ask(callback: CallbackQuery, state: FSMContext) -> Non
         "⚠️ <b>Внимание!</b>\n\n"
         "Вы действительно хотите полностью очистить базу получателей и историю этой рассылки?\n"
         "Это действие нельзя отменить.",
-        reply_markup=confirm_kb("db_clear", f"database:menu:{campaign_id}"),
+        reply_markup=confirm_kb("confirm:db_clear", f"database:menu:{campaign_id}"),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -212,7 +233,10 @@ async def fsm_receive_text(
     try:
         targets = parse_txt(content)
     except Exception as e:
-        await status_msg.edit_text(f"❌ Ошибка обработки текста: {e}", reply_markup=back_to_menu_kb())
+        await status_msg.edit_text(
+            f"❌ Ошибка обработки текста: {html.escape(str(e))}",
+            reply_markup=back_to_menu_kb(),
+        )
         await state.clear()
         return
 
@@ -223,14 +247,38 @@ async def fsm_receive_text(
         )
         return
 
-    added, skipped = await db.add_targets_bulk(campaign_id, targets, "manual_input")
+    svc = SubscriptionService(db)
+    max_targets = await svc.get_limit(user_id, "max_targets")
+    current_total = (await db.get_targets_stats(campaign_id))["total"]
+    if max_targets != -1:
+        available = max_targets - current_total
+        if available <= 0:
+            await state.clear()
+            await status_msg.edit_text(
+                f"❌ Достигнут лимит получателей ({max_targets}).",
+                reply_markup=back_to_menu_kb(),
+            )
+            return
+    requested_count = len(targets)
+    added, skipped = await db.add_targets_bulk(
+        campaign_id,
+        targets,
+        "manual_input",
+        max_targets=max_targets,
+    )
+    limit_reached = added + skipped < requested_count
     stats = await db.get_targets_stats(campaign_id)
     await state.clear()
 
     try:
         await status_msg.edit_text(
             f"{e('✅')} <b>База успешно обновлена!</b>\n\n" \
-            f"Добавлено контактов: <b>{len(targets)}</b>",
+            f"Добавлено контактов: <b>{added}</b>"
+            + (
+                "\n⚠️ Остальные контакты пропущены из-за лимита тарифа."
+                if limit_reached
+                else ""
+            ),
             reply_markup=database_menu_kb(campaign_id, stats),
             parse_mode="HTML"
         )
