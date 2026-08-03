@@ -727,24 +727,16 @@ async def mass_add_zip(message: Message, state: FSMContext, db: Database, manage
 
 @router.callback_query(F.data == "add_acc:use_default_api", StateFilter(AddAccountStates.api_id))
 async def cb_use_default_api(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(api_id=config.DEFAULT_API_ID)
-    await state.set_state(AddAccountStates.api_hash)
-    await callback.message.edit_text(
-        "Выбран стандартный API ID.\n"
-        "Теперь отправьте ваш <b>API Hash</b>:",
-        reply_markup=api_hash_kb(),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-@router.callback_query(F.data == "add_acc:use_default_api_hash", StateFilter(AddAccountStates.api_hash))
-async def cb_use_default_api_hash(callback: CallbackQuery, state: FSMContext) -> None:
+    # API ID и API Hash всегда выдаются Telegram парой — нельзя использовать
+    # стандартный ID со своим Hash. Поэтому кнопка "стандартный" здесь сразу
+    # задаёт обе дефолтные пары и пропускает отдельный шаг ввода Hash,
+    # аналогично вводу текста "0" в fsm_api_id.
     await state.update_data(api_id=config.DEFAULT_API_ID, api_hash=config.DEFAULT_API_HASH)
-    await state.set_state(AddAccountStates.phone)
+    await state.set_state(AddAccountStates.proxy)
     await callback.message.edit_text(
-        "Выбран стандартный API Hash.\n"
-        "Шаг 3/4. Отправьте <b>Номер телефона</b> в международном формате (например, +1234567890):",
-        reply_markup=cancel_kb("accounts:list"),
-        parse_mode="HTML"
+        "✅ Используем стандартный API.\n\n"
+        "Шаг 2/5. Введите <b>Прокси</b> в формате <code>socks5://user:pass@ip:port</code>\n"
+        "или нажмите «Пропустить», если прокси не нужен:",
+        reply_markup=skip_proxy_kb(), parse_mode="HTML",
     )
     await callback.answer()

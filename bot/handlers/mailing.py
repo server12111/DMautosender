@@ -73,6 +73,7 @@ def _build_send_config(campaign: Campaign) -> SendConfig:
         message_text=campaign.text or "",
         parse_mode="html",
         image_file_id=campaign.image_file_id or None,
+        video_file_id=campaign.video_file_id or None,
         attach_file_id=campaign.attach_file_id or None,
         attach_file_name=campaign.attach_file_name or None,
         delay_mode=campaign.delay_mode,
@@ -187,7 +188,7 @@ async def cb_mailing_start(
     if db_stats["remaining"] == 0:
         errors.append("— База получателей пуста или все уже обработаны.")
 
-    if not campaign.text and not campaign.image_file_id and not campaign.attach_file_id:
+    if not campaign.text and not campaign.image_file_id and not campaign.video_file_id and not campaign.attach_file_id:
         errors.append("— Не задан текст или вложения для рассылки.")
 
     if errors:

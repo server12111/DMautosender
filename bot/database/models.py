@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     name            TEXT NOT NULL,
     text            TEXT DEFAULT '',
     image_file_id   TEXT,
+    video_file_id   TEXT,
     attach_file_id  TEXT,
     attach_file_name TEXT,
     delay_mode      TEXT DEFAULT 'fixed',
@@ -182,6 +183,8 @@ MIGRATIONS = [
     "ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'connected'",
     # proxy column for accounts
     "ALTER TABLE accounts ADD COLUMN proxy TEXT",
+    # video attachment support for campaigns
+    "ALTER TABLE campaigns ADD COLUMN video_file_id TEXT",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -262,6 +265,7 @@ class Campaign:
     name: str
     text: str = ""
     image_file_id: Optional[str] = None
+    video_file_id: Optional[str] = None
     attach_file_id: Optional[str] = None
     attach_file_name: Optional[str] = None
     delay_mode: str = "fixed"

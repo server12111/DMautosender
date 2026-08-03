@@ -85,6 +85,13 @@ class UserbotManager:
         session_name = account.session_file or str(
             self._sessions_path / account.phone.replace("+", "")
         )
+        if account.session_file and not Path(account.session_file).exists():
+            # Stored path is stale (e.g. the project directory was moved or
+            # this DB was copied to a different host) — fall back to the
+            # same filename inside the currently configured sessions dir.
+            fallback = self._sessions_path / Path(account.session_file).name
+            if fallback.exists():
+                session_name = str(fallback)
         client = TelegramClient(
             session_name,
             account.api_id,

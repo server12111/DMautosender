@@ -39,6 +39,7 @@ class SendConfig:
     message_text: str
     parse_mode: str = "html"
     image_file_id: Optional[str] = None
+    video_file_id: Optional[str] = None
     attach_file_id: Optional[str] = None
     attach_file_name: Optional[str] = None
     delay_mode: str = "fixed"
@@ -386,6 +387,16 @@ class MailingSender:
         elif self._config.image_file_id:
             # Указываем имя с расширением .jpg — Telethon отправит как фото, не как файл
             file_bytes = await self._download_file(self._config.image_file_id, "photo.jpg")
+            await client.send_file(
+                entity,
+                file_bytes,
+                caption=final_text or None,
+                parse_mode="html",
+                force_document=False,
+            )
+        elif self._config.video_file_id:
+            # Расширение .mp4 — Telethon отправит как видео, не как файл
+            file_bytes = await self._download_file(self._config.video_file_id, "video.mp4")
             await client.send_file(
                 entity,
                 file_bytes,

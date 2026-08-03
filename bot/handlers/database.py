@@ -232,9 +232,9 @@ async def fsm_receive_text(
 
     try:
         targets = parse_txt(content)
-    except Exception as e:
+    except Exception as exc:
         await status_msg.edit_text(
-            f"❌ Ошибка обработки текста: {html.escape(str(e))}",
+            f"❌ Ошибка обработки текста: {html.escape(str(exc))}",
             reply_markup=back_to_menu_kb(),
         )
         await state.clear()

@@ -734,12 +734,13 @@ class Database:
     @_serialized_write
     async def update_campaign_attachments(
         self, campaign_id: int, image_file_id: Optional[str] = None,
+        video_file_id: Optional[str] = None,
         attach_file_id: Optional[str] = None, attach_file_name: Optional[str] = None
     ) -> None:
         await self._conn.execute(
-            """UPDATE campaigns SET image_file_id=?, attach_file_id=?, attach_file_name=?
+            """UPDATE campaigns SET image_file_id=?, video_file_id=?, attach_file_id=?, attach_file_name=?
                WHERE id=?""",
-            (image_file_id, attach_file_id, attach_file_name, campaign_id)
+            (image_file_id, video_file_id, attach_file_id, attach_file_name, campaign_id)
         )
         await self._conn.commit()
 
@@ -917,6 +918,7 @@ class Database:
         await self._conn.commit()
 
     @_serialized_write
+    @_serialized_write
     async def finalize_payment(
         self, payment_id: int, duration_days: int, referral_reward: float
     ) -> tuple[Subscription, bool, Optional[int]] | None:
@@ -927,78 +929,70 @@ class Database:
             "%Y-%m-%d %H:%M:%S"
         )
 
-        async with aiosqlite.connect(self._path, timeout=15) as conn:
-            conn.row_factory = aiosqlite.Row
-            await conn.execute("PRAGMA foreign_keys=ON")
-            await conn.execute("BEGIN IMMEDIATE")
-            try:
-                async with conn.execute(
-                    """SELECT p.*, u.referrer_id
-                       FROM payments p
-                       JOIN users u ON u.id = p.user_id
-                       WHERE p.id = ?""",
-                    (payment_id,),
-                ) as cur:
-                    payment = await cur.fetchone()
-                if not payment:
-                    await conn.rollback()
-                    return None
+        conn = self._conn
+        async with conn.execute(
+            """SELECT p.*, u.referrer_id
+               FROM payments p
+               JOIN users u ON u.id = p.user_id
+               WHERE p.id = ?""",
+            (payment_id,),
+        ) as cur:
+            payment = await cur.fetchone()
+        if not payment:
+            return None
 
-                payment_key = str(payment_id)
-                async with conn.execute(
-                    """SELECT * FROM subscriptions
-                       WHERE user_id=? AND provider=? AND payment_id=?
-                       ORDER BY id DESC LIMIT 1""",
-                    (payment["user_id"], payment["provider"], payment_key),
-                ) as cur:
-                    subscription = await cur.fetchone()
+        payment_key = str(payment_id)
+        async with conn.execute(
+            """SELECT * FROM subscriptions
+               WHERE user_id=? AND provider=? AND payment_id=?
+               ORDER BY id DESC LIMIT 1""",
+            (payment["user_id"], payment["provider"], payment_key),
+        ) as cur:
+            subscription = await cur.fetchone()
 
-                newly_granted = subscription is None
-                referrer_id = payment["referrer_id"]
-                if newly_granted:
-                    await conn.execute(
-                        """UPDATE subscriptions SET is_active=0
-                           WHERE user_id=? AND is_active=1""",
-                        (payment["user_id"],),
-                    )
-                    async with conn.execute(
-                        """INSERT INTO subscriptions
-                           (user_id, plan, expires_at, provider, payment_id)
-                           VALUES (?, ?, ?, ?, ?)""",
-                        (
-                            payment["user_id"],
-                            payment["plan"],
-                            expires,
-                            payment["provider"],
-                            payment_key,
-                        ),
-                    ) as cur:
-                        subscription_id = cur.lastrowid
-                    if referrer_id and referral_reward > 0:
-                        await conn.execute(
-                            "UPDATE users SET balance=balance+? WHERE id=?",
-                            (referral_reward, referrer_id),
-                        )
-                    async with conn.execute(
-                        "SELECT * FROM subscriptions WHERE id=?",
-                        (subscription_id,),
-                    ) as cur:
-                        subscription = await cur.fetchone()
-
+        newly_granted = subscription is None
+        referrer_id = payment["referrer_id"]
+        if newly_granted:
+            await conn.execute(
+                """UPDATE subscriptions SET is_active=0
+                   WHERE user_id=? AND is_active=1""",
+                (payment["user_id"],),
+            )
+            async with conn.execute(
+                """INSERT INTO subscriptions
+                   (user_id, plan, expires_at, provider, payment_id)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    payment["user_id"],
+                    payment["plan"],
+                    expires,
+                    payment["provider"],
+                    payment_key,
+                ),
+            ) as cur:
+                subscription_id = cur.lastrowid
+            if referrer_id and referral_reward > 0:
                 await conn.execute(
-                    """UPDATE payments SET status='paid',
-                       paid_at=COALESCE(paid_at, ?) WHERE id=?""",
-                    (now, payment_id),
+                    "UPDATE users SET balance=balance+? WHERE id=?",
+                    (referral_reward, referrer_id),
                 )
-                await conn.commit()
-                return (
-                    _row_to_sub(subscription),
-                    newly_granted,
-                    referrer_id if newly_granted else None,
-                )
-            except Exception:
-                await conn.rollback()
-                raise
+            async with conn.execute(
+                "SELECT * FROM subscriptions WHERE id=?",
+                (subscription_id,),
+            ) as cur:
+                subscription = await cur.fetchone()
+
+        await conn.execute(
+            """UPDATE payments SET status='paid',
+               paid_at=COALESCE(paid_at, ?) WHERE id=?""",
+            (now, payment_id),
+        )
+        await conn.commit()
+        return (
+            _row_to_sub(subscription),
+            newly_granted,
+            referrer_id if newly_granted else None,
+        )
 
     @_serialized_write
     async def recover_interrupted_mailings(self) -> None:
@@ -1214,8 +1208,9 @@ def _row_to_account(row: aiosqlite.Row) -> Account:
 def _row_to_campaign(row: aiosqlite.Row) -> Campaign:
     return Campaign(
         id=row["id"], user_id=row["user_id"], name=row["name"],
-        text=row["text"], 
+        text=row["text"],
         image_file_id=row["image_file_id"],
+        video_file_id=row["video_file_id"],
         attach_file_id=row["attach_file_id"],
         attach_file_name=row["attach_file_name"],
         delay_mode=row["delay_mode"], delay_fixed=row["delay_fixed"],

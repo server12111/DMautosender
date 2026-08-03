@@ -39,7 +39,7 @@ class ComposeStates(StatesGroup):
 
 def _compose_menu_text(campaign: Campaign) -> str:
     text = campaign.text or ""
-    image = e("✅") if campaign.image_file_id else e("❌")
+    image = e("✅") if (campaign.image_file_id or campaign.video_file_id) else e("❌")
     attach = (
         html.escape(campaign.attach_file_name)
         if campaign.attach_file_name
@@ -70,7 +70,7 @@ async def cb_compose_menu(callback: CallbackQuery, db: Database, state: FSMConte
         _compose_menu_text(campaign),
         reply_markup=compose_menu_kb(
             campaign_id=campaign_id,
-            has_image=bool(campaign.image_file_id),
+            has_image=bool(campaign.image_file_id or campaign.video_file_id),
             has_file=bool(campaign.attach_file_id),
         ),
         parse_mode="HTML",
@@ -111,7 +111,7 @@ async def fsm_receive_text(message: Message, state: FSMContext, db: Database) ->
         "✅ Текст сохранён!\n\n" + _compose_menu_text(campaign),
         reply_markup=compose_menu_kb(
             campaign_id=campaign_id,
-            has_image=bool(campaign.image_file_id),
+            has_image=bool(campaign.image_file_id or campaign.video_file_id),
             has_file=bool(campaign.attach_file_id),
         ),
         parse_mode="HTML",
@@ -123,9 +123,9 @@ async def cb_set_image(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(campaign_id=campaign_id)
     await state.set_state(ComposeStates.waiting_image)
     await callback.message.edit_text(
-        "🖼 <b>Изображение</b>\n\n"
-        "Отправьте фотографию (именно как фото, не как файл).\n"
-        "Она будет прикреплена к каждому сообщению рассылки.",
+        "🖼 <b>Фото или видео</b>\n\n"
+        "Отправьте фото или видео (именно как фото/видео, не как файл).\n"
+        "Оно будет прикреплено к каждому сообщению рассылки.",
         reply_markup=cancel_kb(f"compose:menu:{campaign_id}"),
         parse_mode="HTML",
     )
@@ -137,7 +137,7 @@ async def fsm_receive_image(message: Message, state: FSMContext, db: Database) -
     campaign_id = data.get("campaign_id")
     if not campaign_id:
         return await state.clear()
-        
+
     photo: PhotoSize = message.photo[-1]
     await db.update_campaign_attachments(campaign_id, image_file_id=photo.file_id)
     await state.clear()
@@ -149,12 +149,29 @@ async def fsm_receive_image(message: Message, state: FSMContext, db: Database) -
         parse_mode="HTML",
     )
 
+@router.message(StateFilter(ComposeStates.waiting_image), F.video)
+async def fsm_receive_video(message: Message, state: FSMContext, db: Database) -> None:
+    data = await state.get_data()
+    campaign_id = data.get("campaign_id")
+    if not campaign_id:
+        return await state.clear()
+
+    await db.update_campaign_attachments(campaign_id, video_file_id=message.video.file_id)
+    await state.clear()
+
+    campaign = await db.get_campaign(campaign_id)
+    await message.answer(
+        "✅ Видео сохранено!\n\n" + _compose_menu_text(campaign),
+        reply_markup=compose_menu_kb(campaign_id=campaign_id, has_image=True, has_file=bool(campaign.attach_file_id)),
+        parse_mode="HTML",
+    )
+
 @router.message(StateFilter(ComposeStates.waiting_image), F.document)
 async def fsm_image_as_doc(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     campaign_id = data.get("campaign_id")
     await message.answer(
-        "❌ Пожалуйста, отправьте фото <b>как фотографию</b>, а не как файл.",
+        "❌ Пожалуйста, отправьте фото/видео <b>как фото или видео</b>, а не как файл.",
         reply_markup=cancel_kb(f"compose:menu:{campaign_id}"), parse_mode="HTML",
     )
 
@@ -163,7 +180,7 @@ async def fsm_image_wrong(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     campaign_id = data.get("campaign_id")
     await message.answer(
-        "❌ Пожалуйста, отправьте <b>фотографию</b>.",
+        "❌ Пожалуйста, отправьте <b>фото или видео</b>.",
         reply_markup=cancel_kb(f"compose:menu:{campaign_id}"), parse_mode="HTML",
     )
 
@@ -194,7 +211,7 @@ async def fsm_receive_file(message: Message, state: FSMContext, db: Database) ->
     await message.answer(
         f"✅ Файл «{html.escape(doc.file_name or 'file')}» сохранён!\n\n"
         + _compose_menu_text(campaign),
-        reply_markup=compose_menu_kb(campaign_id=campaign_id, has_image=bool(campaign.image_file_id), has_file=True),
+        reply_markup=compose_menu_kb(campaign_id=campaign_id, has_image=bool(campaign.image_file_id or campaign.video_file_id), has_file=True),
         parse_mode="HTML",
     )
 
@@ -210,7 +227,7 @@ async def fsm_file_wrong(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("compose:clear_attach:"), StateFilter("*"))
 async def cb_clear_attach(callback: CallbackQuery, db: Database) -> None:
     campaign_id = int(callback.data.split(":")[2])
-    await db.update_campaign_attachments(campaign_id, image_file_id=None, attach_file_id=None, attach_file_name=None)
+    await db.update_campaign_attachments(campaign_id, image_file_id=None, video_file_id=None, attach_file_id=None, attach_file_name=None)
     campaign = await db.get_campaign(campaign_id)
     await callback.message.edit_text(
         "✅ Вложения удалены.\n\n" + _compose_menu_text(campaign),
@@ -226,9 +243,10 @@ async def cb_preview(callback: CallbackQuery, db: Database, bot: Bot) -> None:
     
     text = campaign.text or ""
     image_id = campaign.image_file_id or ""
+    video_id = campaign.video_file_id or ""
     file_id = campaign.attach_file_id or ""
 
-    if not text and not image_id and not file_id:
+    if not text and not image_id and not video_id and not file_id:
         await callback.answer("⚠️ Нет ни текста, ни вложения!", show_alert=True)
         return
 
@@ -246,6 +264,12 @@ async def cb_preview(callback: CallbackQuery, db: Database, bot: Bot) -> None:
                 caption=text or None,
                 parse_mode="HTML",
             )
+        elif video_id:
+            await bot.send_video(
+                chat_id, video_id,
+                caption=text or None,
+                parse_mode="HTML",
+            )
         else:
             await bot.send_message(chat_id, text, parse_mode="HTML")
         await callback.answer("✅ Предпросмотр отправлен!")
@@ -260,7 +284,7 @@ async def cb_format_help(callback: CallbackQuery, db: Database) -> None:
         FORMAT_HELP,
         reply_markup=compose_menu_kb(
             campaign_id=campaign_id,
-            has_image=bool(campaign.image_file_id),
+            has_image=bool(campaign.image_file_id or campaign.video_file_id),
             has_file=bool(campaign.attach_file_id),
         ),
         parse_mode="HTML",
