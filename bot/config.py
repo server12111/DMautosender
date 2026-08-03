@@ -44,8 +44,8 @@ class Config:
     DEFAULT_BUSINESS_PRICE_USD: float = float(os.getenv("DEFAULT_BUSINESS_PRICE_USD", "5.0"))
 
     # ── Legal URLs ────────────────────────────────────────────────────────────
-    PRIVACY_URL: str = os.getenv("PRIVACY_URL", "https://telegra.ph/")
-    TERMS_URL: str = os.getenv("TERMS_URL", "https://telegra.ph/")
+    PRIVACY_URL: str = os.getenv("PRIVACY_URL", "https://telegra.ph/Politika-konfidencialnosti-DMautosender-08-03")
+    TERMS_URL: str = os.getenv("TERMS_URL", "https://telegra.ph/Polzovatelskoe-soglashenie-DMautosender-08-03")
 
     @classmethod
     def ensure_dirs(cls) -> None:
