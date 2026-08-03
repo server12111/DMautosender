@@ -25,6 +25,7 @@ from telethon.errors import (
 
 from ..database.db import Database
 from ..utils.spintax import evaluate_spintax
+from ..utils.emoji import apply_premium_emoji
 from ..userbot.manager import UserbotManager
 
 logger = logging.getLogger("dmsender.sender")
@@ -272,6 +273,15 @@ class MailingSender:
         account = await self._db.get_account(account_id)
         acc_label = account.phone if account else f"#{account_id}"
 
+        # Sending a <tg-emoji> entity from a non-Premium account fails with
+        # PREMIUM_ACCOUNT_REQUIRED, so premium emoji are only safe to attach
+        # for accounts that actually have Telegram Premium themselves.
+        try:
+            me = await client.get_me()
+            is_premium = bool(getattr(me, "premium", False))
+        except Exception:
+            is_premium = False
+
         while not self._stop_event.is_set():
             try:
                 identifier = self._queue.get_nowait()
@@ -284,7 +294,7 @@ class MailingSender:
                 continue
 
             try:
-                await self._send_to_user(client, identifier, self._config)
+                await self._send_to_user(client, identifier, self._config, is_premium)
                 await self._db.mark_sent(self._campaign_id, identifier, account_id, "sent")
                 self._stats.sent += 1
                 await self._log(f"✅ [{acc_label}] → {identifier}")
@@ -366,7 +376,8 @@ class MailingSender:
             raise _NoPeerAccessError(user_id)
 
     async def _send_to_user(
-        self, client: TelegramClient, identifier: str, config: SendConfig
+        self, client: TelegramClient, identifier: str, config: SendConfig,
+        is_premium: bool = False,
     ) -> None:
         if identifier.lstrip("-").isdigit():
             entity = await self._resolve_numeric_id(client, int(identifier))
@@ -374,6 +385,8 @@ class MailingSender:
             entity = await client.get_entity(identifier)
 
         final_text = evaluate_spintax(self._config.message_text or "")
+        if is_premium:
+            final_text = apply_premium_emoji(final_text)
 
         if self._config.attach_file_id:
             file_bytes = await self._download_file(self._config.attach_file_id, self._config.attach_file_name or "file")

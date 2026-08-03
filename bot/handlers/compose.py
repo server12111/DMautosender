@@ -1,6 +1,6 @@
 import html
 import logging
-from ..utils.emoji import e
+from ..utils.emoji import e, apply_premium_emoji
 from aiogram import Router, F
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..keyboards.inline import _btn
@@ -28,6 +28,9 @@ FORMAT_HELP = (
     "<code>моноширинный</code> → <code>&lt;code&gt;текст&lt;/code&gt;</code>\n"
     "<tg-spoiler>спойлер</tg-spoiler> → <code>&lt;tg-spoiler&gt;текст&lt;/tg-spoiler&gt;</code>\n"
     "<a href='https://t.me'>ссылка</a> → <code>&lt;a href='URL'&gt;текст&lt;/a&gt;</code>\n\n"
+    f"{e('✨')} Если аккаунт-отправитель имеет Telegram Premium, часть emoji в тексте "
+    "автоматически заменяется на анимированные premium-emoji (для непремиум-аккаунтов "
+    "рассылка уходит с обычными emoji — так безопаснее).\n\n"
     f"<i>{e('💡')} Пример:</i>\n"
     "<code>Привет, &lt;b&gt;мир&lt;/b&gt;! Это &lt;i&gt;курсив&lt;/i&gt;</code>"
 )
@@ -240,8 +243,8 @@ async def cb_clear_attach(callback: CallbackQuery, db: Database) -> None:
 async def cb_preview(callback: CallbackQuery, db: Database, bot: Bot) -> None:
     campaign_id = int(callback.data.split(":")[2])
     campaign = await db.get_campaign(campaign_id)
-    
-    text = campaign.text or ""
+
+    text = apply_premium_emoji(campaign.text or "")
     image_id = campaign.image_file_id or ""
     video_id = campaign.video_file_id or ""
     file_id = campaign.attach_file_id or ""

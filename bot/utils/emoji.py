@@ -1,3 +1,5 @@
+import re
+
 # Premium emoji IDs for AutoSender DM
 # Usage in messages (HTML parse_mode):
 #   from ..utils.emoji import e
@@ -122,7 +124,7 @@ def e(emoji: str) -> str:
     """
     Возвращает premium tg-emoji HTML-тег для использования в тексте сообщений.
     Если ID не найден — возвращает обычный emoji.
-    
+
     Используй ТОЛЬКО в тексте сообщений с parse_mode=HTML.
     В тексте кнопок просто используй обычный emoji-символ.
     """
@@ -130,6 +132,24 @@ def e(emoji: str) -> str:
     if eid:
         return f'<tg-emoji emoji-id="{eid}">{emoji}</tg-emoji>'
     return emoji
+
+
+# Longest-first so multi-codepoint emoji (e.g. "⚠️") match before their
+# base character (e.g. "⚠").
+_SORTED_TEXT_EMOJI = sorted(EMOJI_IDS.keys(), key=len, reverse=True)
+_TEXT_EMOJI_RE = re.compile("|".join(re.escape(x) for x in _SORTED_TEXT_EMOJI))
+
+
+def apply_premium_emoji(text: str) -> str:
+    """
+    Заменяет обычные emoji в произвольном HTML-тексте (parse_mode=HTML) на
+    premium tg-emoji теги, где для них есть ID. Используется для текста
+    рассылок, который вводит пользователь — он печатает обычные emoji, а
+    получатели с Telegram Premium увидят анимированные премиум-версии.
+    """
+    if not text or not _SORTED_TEXT_EMOJI:
+        return text
+    return _TEXT_EMOJI_RE.sub(lambda m: e(m.group()), text)
 
 
 def plan_badge(plan: str) -> str:

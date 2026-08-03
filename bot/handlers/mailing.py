@@ -123,10 +123,34 @@ def _build_status_text(stats, db_stats: dict) -> str:
     )
 
 
-async def _on_mailing_finished(bot: Bot, db: Database, campaign_id: int) -> None:
-    """Called when mailing sender finishes naturally (all targets processed)."""
-    await db.update_campaign_status(campaign_id, "stopped")
+async def _on_spamblock(bot: Bot, campaign_id: int, acc_label: str, reason: str) -> None:
+    """Tell the campaign owner their account just got flood/spam-restricted."""
+    info = _status_info.get(campaign_id)
+    if not info:
+        return
+    chat_id, _ = info
+    try:
+        await bot.send_message(
+            chat_id,
+            f"⛔ <b>Аккаунт {acc_label} получил спам-ограничение</b>\n\n"
+            f"{reason}\n\n"
+            "Рассылка для этого аккаунта остановлена. Проверьте статус аккаунта в разделе "
+            "«Мои аккаунты» — сброс ограничения может занять некоторое время, "
+            "принудительно снять его через бота нельзя.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.exception("Не удалось уведомить о спам-блоке (кампания %s)", campaign_id)
 
+
+async def _on_mailing_finished(bot: Bot, db: Database, campaign_id: int) -> None:
+    """Called when mailing sender finishes naturally (all targets processed).
+
+    In-memory bookkeeping is cleared *first* and unconditionally: if a DB
+    call below fails, the campaign must not stay stuck in `_senders`, since
+    that dict is what `mailing:start` and `campaign:delete` both check —
+    a stale entry there would block both actions until a full bot restart.
+    """
     task = _update_tasks.pop(campaign_id, None)
     if task and not task.done():
         task.cancel()
@@ -135,19 +159,24 @@ async def _on_mailing_finished(bot: Bot, db: Database, campaign_id: int) -> None
     _sender_tasks.pop(campaign_id, None)
     info = _status_info.pop(campaign_id, None)
 
+    try:
+        await db.update_campaign_status(campaign_id, "stopped")
+    except Exception:
+        logger.exception("Не удалось сбросить статус рассылки %s в БД", campaign_id)
+
     if sender and info:
-        stats = sender.stats
-        db_stats = await db.get_send_stats(campaign_id)
-        campaign = await db.get_campaign(campaign_id)
-        text = (
-            f"✅ <b>Рассылка завершена!</b>\n\n"
-            f"├ Отправлено:    <b>{stats.sent}</b>\n"
-            f"├ Ошибок:        <b>{stats.errors}</b>\n"
-            f"├ Заблокировано: <b>{stats.blocked}</b>\n"
-            f"└ Всего обработано: <b>{db_stats.get('total', '?')}</b>"
-        )
-        chat_id, msg_id = info
         try:
+            stats = sender.stats
+            db_stats = await db.get_send_stats(campaign_id)
+            campaign = await db.get_campaign(campaign_id)
+            text = (
+                f"✅ <b>Рассылка завершена!</b>\n\n"
+                f"├ Отправлено:    <b>{stats.sent}</b>\n"
+                f"├ Ошибок:        <b>{stats.errors}</b>\n"
+                f"├ Заблокировано: <b>{stats.blocked}</b>\n"
+                f"└ Всего обработано: <b>{db_stats.get('total', '?')}</b>"
+            )
+            chat_id, msg_id = info
             await bot.edit_message_text(
                 text,
                 chat_id=chat_id,
@@ -205,7 +234,8 @@ async def cb_mailing_start(
 
     sender = MailingSender(db, manager, bot, campaign_id, active_account_ids, config)
     sender.set_callbacks(
-        on_finished=functools.partial(_on_mailing_finished, bot, db, campaign_id)
+        on_finished=functools.partial(_on_mailing_finished, bot, db, campaign_id),
+        on_spamblock=functools.partial(_on_spamblock, bot, campaign_id),
     )
     _senders[campaign_id] = sender
     try:
@@ -264,27 +294,34 @@ async def cb_mailing_stop(callback: CallbackQuery, db: Database) -> None:
             except asyncio.TimeoutError:
                 sender_task.cancel()
                 await asyncio.gather(sender_task, return_exceptions=True)
-        await db.reset_pending_claims(campaign_id)
+
+        # Clear bookkeeping *before* any further DB calls: mailing:start and
+        # campaign:delete both key off `_senders`, so a stale entry here
+        # (e.g. left behind by a failing DB call below) would block both.
         _senders.pop(campaign_id, None)
         _sender_tasks.pop(campaign_id, None)
         _status_info.pop(campaign_id, None)
 
-        stats = sender.stats
-        db_stats = await db.get_targets_stats(campaign_id)
-        campaign = await db.get_campaign(campaign_id)
+        try:
+            await db.reset_pending_claims(campaign_id)
+            stats = sender.stats
+            db_stats = await db.get_targets_stats(campaign_id)
+            campaign = await db.get_campaign(campaign_id)
 
-        text = (
-            f"🛑 <b>Рассылка остановлена</b>\n\n"
-            f"├ Отправлено:    <b>{stats.sent}</b>\n"
-            f"├ Ошибок:        <b>{stats.errors}</b>\n"
-            f"└ Заблокировано: <b>{stats.blocked}</b>\n\n"
-            f"Всего осталось:  <b>{db_stats.get('remaining', 0)}</b>"
-        )
-        await callback.message.edit_text(
-            text,
-            reply_markup=campaign_menu_kb(campaign),
-            parse_mode="HTML",
-        )
+            text = (
+                f"🛑 <b>Рассылка остановлена</b>\n\n"
+                f"├ Отправлено:    <b>{stats.sent}</b>\n"
+                f"├ Ошибок:        <b>{stats.errors}</b>\n"
+                f"└ Заблокировано: <b>{stats.blocked}</b>\n\n"
+                f"Всего осталось:  <b>{db_stats.get('remaining', 0)}</b>"
+            )
+            await callback.message.edit_text(
+                text,
+                reply_markup=campaign_menu_kb(campaign),
+                parse_mode="HTML",
+            )
+        except Exception:
+            logger.exception("Ошибка завершения остановки рассылки %s", campaign_id)
     else:
         _senders.pop(campaign_id, None)
         _status_info.pop(campaign_id, None)
