@@ -8,7 +8,7 @@ from ..keyboards.inline import main_menu_kb
 router = Router()
 
 MENU_TEXT = (
-    "🤖 <b>DMautosender</b> — рассылка через пользовательские аккаунты Telegram\n\n"
+    "🤖 <b>AutoSender DM</b> — рассылка через пользовательские аккаунты Telegram\n\n"
     "Выберите действие:"
 )
 

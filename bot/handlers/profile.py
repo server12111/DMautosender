@@ -43,7 +43,7 @@ async def _profile_text(user: BotUser, db: Database) -> str:
     reg_date = user.created_at[:10] if user.created_at else "—"
 
     from ..config import config
-    bot_username = await db.get_bot_setting("bot_username", "DMautosenderBot")
+    bot_username = await db.get_bot_setting("bot_username", "feAutoSenderDMbot")
     referrals_count = await db.get_referrals_count(user.id)
     ref_link = f"https://t.me/{bot_username}?start=ref_{user.id}"
     

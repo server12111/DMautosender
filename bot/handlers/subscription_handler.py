@@ -145,7 +145,7 @@ async def cb_pay_platega(callback: CallbackQuery, db: Database) -> None:
         order_id=order_id,
         amount=amount,
         currency="USD",
-        description=f"DMautosender {plan.capitalize()} — 30 дней",
+        description=f"AutoSender DM {plan.capitalize()} — 30 дней",
     )
 
     if not result:
@@ -202,7 +202,7 @@ async def cb_pay_cryptobot(callback: CallbackQuery, db: Database) -> None:
     result = await payment_cryptobot.create_invoice(
         amount=amount,
         asset="USDT",
-        description=f"DMautosender {plan.capitalize()} — 30 дней",
+        description=f"AutoSender DM {plan.capitalize()} — 30 дней",
         payload=f"dm_{user.id}_{payment.id}",
     )
 

@@ -25,7 +25,7 @@ def _headers() -> dict:
 async def create_invoice(
     amount: float,
     asset: str = "USDT",
-    description: str = "DMautosender Subscription",
+    description: str = "AutoSender DM Subscription",
     payload: str = "",
     expires_in: int = 3600,
 ) -> Optional[dict]:

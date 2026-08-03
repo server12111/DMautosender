@@ -37,7 +37,7 @@ async def main() -> None:
     ):
         raise RuntimeError("Цены тарифов по умолчанию должны быть положительными")
 
-    logger.info("Инициализация DMautosender SaaS...")
+    logger.info("Инициализация AutoSender DM SaaS...")
 
     db = Database(config.DATABASE_PATH)
     bot: Bot | None = None

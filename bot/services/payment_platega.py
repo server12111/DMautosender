@@ -27,7 +27,7 @@ async def create_payment_link(
     order_id: str,
     amount: float,
     currency: str = "USD",
-    description: str = "DMautosender Subscription",
+    description: str = "AutoSender DM Subscription",
     success_url: str = "",
 ) -> Optional[dict]:
     """

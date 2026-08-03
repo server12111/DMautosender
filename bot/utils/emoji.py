@@ -1,4 +1,4 @@
-# Premium emoji IDs for DMautosender
+# Premium emoji IDs for AutoSender DM
 # Usage in messages (HTML parse_mode):
 #   from ..utils.emoji import e
 #   text = f"{e('✅')} Подписка активна"
